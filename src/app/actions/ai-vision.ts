@@ -103,9 +103,12 @@ KEMBALIKAN HANYA JSON MURNI TANPA BACKTICKS ATAU MARKDOWN:
 }
 `
 
-    // Call Gemini 1.5 Flash via REST API
+    // Model configuration with default fallback to gemini-3.8-flash
+    const model = (process.env.GEMINI_MODEL || 'gemini-3.8-flash').trim()
+
+    // Call Gemini Developer API via REST endpoint
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: {
@@ -134,19 +137,41 @@ KEMBALIKAN HANYA JSON MURNI TANPA BACKTICKS ATAU MARKDOWN:
     )
 
     if (!response.ok) {
-      const errBody = await response.text()
-      console.error('Gemini API Error:', errBody)
+      let errMessage = `HTTP ${response.status}`
+      try {
+        const errBody = await response.text()
+        console.error('Gemini API Error:', errBody)
+        const parsedErr = JSON.parse(errBody)
+        if (parsedErr.error?.message) {
+          errMessage = parsedErr.error.message
+        }
+      } catch {
+        // fallback to default HTTP status
+      }
+
+      // Ensure API Key is never leaked in the returned error message
+      if (apiKey) {
+        errMessage = errMessage.replaceAll(apiKey, '[REDACTED_API_KEY]')
+      }
+
       if (response.status === 400 || response.status === 403) {
         return {
           success: false,
           needsApiKey: true,
-          error:
-            'Kunci Gemini API tidak valid atau izin ditolak. Silakan periksa kembali API Key Anda.',
+          error: `Kunci Gemini API tidak valid atau izin ditolak (${errMessage}). Silakan periksa kembali API Key Anda.`,
         }
       }
+
+      if (response.status === 404) {
+        return {
+          success: false,
+          error: `Model AI '${model}' tidak ditemukan atau belum didukung untuk endpoint ini (${errMessage}). Anda dapat menyesuaikan konfigurasi GEMINI_MODEL.`,
+        }
+      }
+
       return {
         success: false,
-        error: `Gagal menganalisis gambar via AI Gemini (HTTP ${response.status}). Silakan coba lagi.`,
+        error: `Gagal menganalisis gambar via AI Gemini (${errMessage}). Silakan coba lagi.`,
       }
     }
 
