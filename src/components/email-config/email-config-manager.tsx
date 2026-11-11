@@ -10,6 +10,7 @@ import { SenderSettingsForm } from '@/components/email-config/sender-settings-fo
 import { TemplateList } from '@/components/email-config/template-list'
 import { TemplateModal } from '@/components/email-config/template-modal'
 import { TemplatePreviewModal } from '@/components/email-config/template-preview-modal'
+import { VisualLayoutEditorModal } from '@/components/templates/visual-layout-editor-modal'
 
 interface EmailConfigManagerProps {
   initialSettings: EmailSettingsRow | null
@@ -27,6 +28,8 @@ export function EmailConfigManager({
   const [activeModal, setActiveModal] = React.useState<'create' | 'edit' | null>(null)
   const [editingTemplate, setEditingTemplate] = React.useState<EmailTemplateRow | null>(null)
   const [previewTemplate, setPreviewTemplate] = React.useState<EmailTemplateRow | null>(null)
+  const [visualEditorTemplate, setVisualEditorTemplate] = React.useState<EmailTemplateRow | null>(null)
+  const [isVisualEditorOpen, setIsVisualEditorOpen] = React.useState(false)
   const [isRefreshing, setIsRefreshing] = React.useState(false)
 
   // Keep state in sync when server revalidates
@@ -45,6 +48,7 @@ export function EmailConfigManager({
   }
 
   const senderName = settings?.sender_name || ''
+  const senderEmail = settings?.sender_email || ''
 
   return (
     <div className="space-y-6">
@@ -93,12 +97,29 @@ export function EmailConfigManager({
               setActiveModal('edit')
             }}
             onOpenPreview={(tpl) => setPreviewTemplate(tpl)}
+            onOpenVisualEditor={(tpl) => {
+              setVisualEditorTemplate(tpl || null)
+              setIsVisualEditorOpen(true)
+            }}
             onSuccess={handleRefresh}
           />
         </TabsContent>
       </Tabs>
 
-      {/* Create / Edit Template Modal */}
+      {/* Visual Layout & AI Vision Editor Modal */}
+      <VisualLayoutEditorModal
+        open={isVisualEditorOpen}
+        onOpenChange={(open) => {
+          setIsVisualEditorOpen(open)
+          if (!open) setVisualEditorTemplate(null)
+        }}
+        template={visualEditorTemplate}
+        senderName={senderName}
+        senderEmail={senderEmail}
+        onSuccess={handleRefresh}
+      />
+
+      {/* Create / Edit Standard Template Modal */}
       <TemplateModal
         open={Boolean(activeModal)}
         onOpenChange={(open) => {

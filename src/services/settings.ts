@@ -70,7 +70,7 @@ export const settingsService = {
       .order('is_default', { ascending: false })
       .order('created_at', { ascending: false })
 
-    return { data, error: error ? new Error(error.message) : null }
+    return { data: data as unknown as EmailTemplateRow[] | null, error: error ? new Error(error.message) : null }
   },
 
   /**
@@ -94,6 +94,6 @@ export const settingsService = {
       .select()
       .single()
 
-    return { data, error: error ? new Error(error.message) : null }
+    return { data: data as unknown as EmailTemplateRow | null, error: error ? new Error(error.message) : null }
   },
 }

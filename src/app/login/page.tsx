@@ -173,9 +173,14 @@ function LoginFormContent() {
       </Card>
 
       {/* Security & RLS notice */}
-      <p className="text-center text-[11px] text-muted-foreground">
-        Dilindungi oleh Supabase Row-Level Security (RLS) & enkripsi sesi SSL.
-      </p>
+      <div className="text-center text-[11px] text-muted-foreground space-y-1">
+        <p>Dilindungi oleh Supabase Row-Level Security (RLS) & enkripsi sesi SSL.</p>
+        <p>
+          <Link href="/privacy" className="underline hover:text-foreground transition-colors">
+            Kebijakan Privasi
+          </Link>
+        </p>
+      </div>
     </div>
   )
 }

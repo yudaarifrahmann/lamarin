@@ -244,9 +244,14 @@ function VerifyOtpContent() {
         </CardContent>
       </Card>
 
-      <p className="text-center text-[11px] text-muted-foreground">
-        Autentikasi diamankan oleh protokol resmi Supabase OTP.
-      </p>
+      <div className="text-center text-[11px] text-muted-foreground space-y-1">
+        <p>Autentikasi diamankan oleh protokol resmi Supabase OTP.</p>
+        <p>
+          <Link href="/privacy" className="underline hover:text-foreground transition-colors">
+            Kebijakan Privasi
+          </Link>
+        </p>
+      </div>
     </div>
   )
 }

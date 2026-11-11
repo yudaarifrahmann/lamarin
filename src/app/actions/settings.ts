@@ -8,6 +8,7 @@ import type {
   EmailTemplateRow,
   EmailTemplateInsert,
   EmailTemplateUpdate,
+  TemplateLayoutConfig,
 } from '@/types/config'
 import type { ActionResponse } from '@/app/actions/documents'
 
@@ -76,6 +77,7 @@ export async function createTemplateAction(payload: {
   subject: string
   message: string
   is_default: boolean
+  layout_config?: TemplateLayoutConfig | null
 }): Promise<ActionResponse<EmailTemplateRow>> {
   try {
     const supabase = await createClient()
@@ -107,7 +109,7 @@ export async function createTemplateAction(payload: {
         .eq('user_id', user.id)
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('email_templates')
       .insert({
         user_id: user.id,
@@ -115,16 +117,35 @@ export async function createTemplateAction(payload: {
         subject,
         message: payload.message,
         is_default: payload.is_default,
+        layout_config: (payload.layout_config as any) || null,
       })
       .select()
       .single()
+
+    // Graceful fallback if layout_config column is not in PostgREST schema cache yet
+    if (error && error.message.includes('layout_config')) {
+      const fallback = await supabase
+        .from('email_templates')
+        .insert({
+          user_id: user.id,
+          template_name: templateName,
+          subject,
+          message: payload.message,
+          is_default: payload.is_default,
+        })
+        .select()
+        .single()
+
+      data = fallback.data
+      error = fallback.error
+    }
 
     if (error) {
       return { success: false, error: `Gagal membuat template: ${error.message}` }
     }
 
     revalidatePath('/konfigurasi-email')
-    return { success: true, data }
+    return { success: true, data: data as unknown as EmailTemplateRow }
   } catch (err) {
     return {
       success: false,
@@ -143,6 +164,7 @@ export async function updateTemplateAction(
     subject: string
     message: string
     is_default: boolean
+    layout_config?: TemplateLayoutConfig | null
   }
 ): Promise<ActionResponse<EmailTemplateRow>> {
   try {
@@ -175,25 +197,45 @@ export async function updateTemplateAction(
         .eq('user_id', user.id)
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('email_templates')
       .update({
         template_name: templateName,
         subject,
         message: payload.message,
         is_default: payload.is_default,
+        layout_config: (payload.layout_config as any) || null,
       })
       .eq('id', id)
       .eq('user_id', user.id)
       .select()
       .single()
 
+    // Graceful fallback if layout_config column is not in PostgREST schema cache yet
+    if (error && error.message.includes('layout_config')) {
+      const fallback = await supabase
+        .from('email_templates')
+        .update({
+          template_name: templateName,
+          subject,
+          message: payload.message,
+          is_default: payload.is_default,
+        })
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .select()
+        .single()
+
+      data = fallback.data
+      error = fallback.error
+    }
+
     if (error) {
       return { success: false, error: `Gagal memperbarui template: ${error.message}` }
     }
 
     revalidatePath('/konfigurasi-email')
-    return { success: true, data }
+    return { success: true, data: data as unknown as EmailTemplateRow }
   } catch (err) {
     return {
       success: false,

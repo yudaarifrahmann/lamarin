@@ -71,6 +71,7 @@ export interface Database {
           subject: string
           message: string
           is_default: boolean
+          layout_config?: Json | null
           created_at: string
           updated_at: string
         }
@@ -81,6 +82,7 @@ export interface Database {
           subject: string
           message: string
           is_default?: boolean
+          layout_config?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -91,6 +93,7 @@ export interface Database {
           subject?: string
           message?: string
           is_default?: boolean
+          layout_config?: Json | null
           created_at?: string
           updated_at?: string
         }

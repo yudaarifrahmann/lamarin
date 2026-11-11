@@ -4,6 +4,7 @@ import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
+import { Footer } from '@/components/layout/footer'
 import type { ProfileData } from '@/services/auth'
 
 export const instant = false
@@ -53,6 +54,7 @@ export default async function DashboardLayout({
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {children}
         </main>
+        <Footer />
       </div>
     </div>
   )

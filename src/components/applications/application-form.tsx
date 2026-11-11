@@ -48,6 +48,9 @@ export function ApplicationForm({
 }: ApplicationFormProps) {
   // Find default template if any
   const defaultTemplate = emailTemplates.find((t) => t.is_default)
+  const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | undefined>(
+    defaultTemplate?.id
+  )
 
   // Form states
   const [recipientEmail, setRecipientEmail] = React.useState('')
@@ -85,6 +88,7 @@ export function ApplicationForm({
 
   // Load a chosen template into the subject & message inputs
   const handleSelectTemplate = (tplId: string) => {
+    setSelectedTemplateId(tplId)
     const tpl = emailTemplates.find((t) => t.id === tplId)
     if (tpl) {
       setSubject(tpl.subject)
@@ -220,6 +224,7 @@ export function ApplicationForm({
       position: position.trim(),
       subject: subject.trim() || undefined,
       message: message.trim() || undefined,
+      template_id: selectedTemplateId,
       selected_document_ids: selectedDocuments.map((d) => d.id),
     })
 
@@ -382,18 +387,25 @@ export function ApplicationForm({
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-muted-foreground">Template:</span>
                     <select
+                      value={selectedTemplateId || ''}
                       onChange={(e) => e.target.value && handleSelectTemplate(e.target.value)}
-                      defaultValue=""
                       className="h-7 text-xs rounded-md border border-border bg-muted/40 px-2 text-foreground focus:outline-none"
                     >
                       <option value="" disabled>
                         Pilih template tersimpan...
                       </option>
-                      {emailTemplates.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.template_name} {t.is_default ? '(Default)' : ''}
-                        </option>
-                      ))}
+                      {emailTemplates.map((t) => {
+                        const isVisual = Boolean(
+                          t.layout_config &&
+                            Array.isArray(t.layout_config.blocks) &&
+                            t.layout_config.blocks.length > 0
+                        )
+                        return (
+                          <option key={t.id} value={t.id}>
+                            {t.template_name} {isVisual ? '✨ [Visual A4]' : ''} {t.is_default ? '(Default)' : ''}
+                          </option>
+                        )
+                      })}
                     </select>
                   </div>
                 )}

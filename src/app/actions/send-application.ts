@@ -7,6 +7,8 @@ import { buildMimeMessage, type EmailAttachment } from '@/lib/gmail/mime'
 import { decryptToken } from '@/lib/encryption'
 import { replacePlaceholders } from '@/lib/placeholders'
 import { isPdfDocument, generateMergedPdfFilename, mergePdfBuffers } from '@/lib/pdf/merger'
+import { renderLayoutToHtml } from '@/lib/templates/layout-engine'
+import type { TemplateLayoutConfig } from '@/types/template-layout'
 import type { ActionResponse } from '@/app/actions/documents'
 
 const STORAGE_BUCKET = 'application-documents'
@@ -18,6 +20,7 @@ export interface SendApplicationPayload {
   position: string
   subject?: string
   message?: string
+  template_id?: string
   selected_document_ids?: string[]
 }
 
@@ -171,6 +174,21 @@ export async function sendApplicationAction(
       .eq('is_default', true)
       .maybeSingle()
 
+    // Resolve Chosen Template (Priority: 1. Manual Chosen -> 2. User Default -> 3. Standard Fallback)
+    let chosenTemplate = defaultTemplate
+    if (payload.template_id) {
+      const { data: specificTemplate } = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('id', payload.template_id)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (specificTemplate) {
+        chosenTemplate = specificTemplate
+      }
+    }
+
     const senderName =
       emailSettings?.sender_name ||
       user.user_metadata?.full_name ||
@@ -179,10 +197,10 @@ export async function sendApplicationAction(
     // Authorized Gmail address from user's verified gmail_connections record
     const senderEmail = gmailConn.gmail_email
 
-    // 7. Resolve Subject (Manual -> Default Template -> Email Settings -> Fallback)
+    // 7. Resolve Subject (Manual -> Chosen/Default Template -> Email Settings -> Fallback)
     const rawSubject =
       payload.subject?.trim() ||
-      defaultTemplate?.subject ||
+      chosenTemplate?.subject ||
       emailSettings?.default_subject ||
       'Lamaran Pekerjaan: {{position}} - {{company_name}}'
 
@@ -195,7 +213,7 @@ export async function sendApplicationAction(
     // 8. Resolve Message Body
     const rawMessage =
       payload.message?.trim() ||
-      defaultTemplate?.message ||
+      chosenTemplate?.message ||
       emailSettings?.default_message
 
     if (!rawMessage) {
@@ -406,13 +424,39 @@ export async function sendApplicationAction(
       }
     }
 
-    // 13. Build RFC 2822 / RFC 2045 compliant MIME message
+    // 13. Determine HTML Email Output
+    // If template has visual layout_config, render using layout engine
+    // Otherwise fallback to Lamarin standard default responsive email format
+    let finalHtml: string
+    const templateLayoutConfig = chosenTemplate?.layout_config as unknown as TemplateLayoutConfig | null
+
+    if (
+      templateLayoutConfig &&
+      Array.isArray(templateLayoutConfig.blocks) &&
+      templateLayoutConfig.blocks.length > 0
+    ) {
+      finalHtml = renderLayoutToHtml(
+        templateLayoutConfig,
+        {
+          company_name: companyName,
+          position: position,
+          sender_name: senderName,
+          sender_email: senderEmail,
+        },
+        { forEmail: true }
+      )
+    } else {
+      // Standard Lamarin default HTML format (100% backward compatible)
+      finalHtml = formatEmailHtml(resolvedMessage)
+    }
+
+    // 14. Build RFC 2822 / RFC 2045 compliant MIME message
     const rawMime = buildMimeMessage({
       from: senderEmail,
       senderName,
       to: recipientEmail,
       subject: resolvedSubject,
-      html: formatEmailHtml(resolvedMessage),
+      html: finalHtml,
       attachments: gmailAttachments,
     })
 

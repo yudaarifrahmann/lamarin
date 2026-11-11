@@ -139,6 +139,16 @@ export function Sidebar({ className, user, profile }: SidebarProps) {
             </p>
           </div>
         )}
+
+        <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground px-1">
+          <span>&copy; 2026 Lamarin</span>
+          <Link
+            href="/privacy"
+            className="hover:text-foreground transition-colors underline underline-offset-2"
+          >
+            Kebijakan Privasi
+          </Link>
+        </div>
       </div>
     </aside>
   )
