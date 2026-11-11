@@ -26,6 +26,7 @@ import {
   Bold,
   Italic,
   Key,
+  FileSearch,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type {
@@ -73,6 +74,98 @@ const FONT_OPTIONS: { label: string; value: FontFamily }[] = [
   { label: 'Segoe UI (Contemporary)', value: 'Segoe UI' },
   { label: 'Helvetica (Standard Sans)', value: 'Helvetica' },
 ]
+
+/* ─── AI Vision Analyzing Loader ─── */
+function VisionAnalyzingLoader() {
+  return (
+    <div className="flex flex-col items-center justify-center py-8 px-4 space-y-6 select-none">
+      {/* Scanning animation container */}
+      <div className="relative flex items-center justify-center">
+        {/* Outer glow ring */}
+        <div className="absolute inset-0 rounded-2xl bg-primary/10 animate-pulse scale-110" />
+
+        {/* Document frame */}
+        <div
+          className="relative overflow-hidden rounded-2xl border border-primary/30 bg-card shadow-lg"
+          style={{ width: 120, height: 160 }}
+        >
+          {/* Document lines (simulate letter content) */}
+          <div className="p-3 space-y-1.5 opacity-30">
+            <div className="h-1.5 w-14 rounded-full bg-primary/60 ml-auto" />
+            <div className="h-1.5 w-20 rounded-full bg-muted-foreground/50 mt-3" />
+            <div className="h-1.5 w-24 rounded-full bg-muted-foreground/40" />
+            <div className="h-1.5 w-16 rounded-full bg-muted-foreground/40" />
+            <div className="h-1 w-0 mt-2" />
+            <div className="h-1.5 w-24 rounded-full bg-muted-foreground/40" />
+            <div className="h-1.5 w-28 rounded-full bg-muted-foreground/30" />
+            <div className="h-1.5 w-24 rounded-full bg-muted-foreground/30" />
+            <div className="h-1.5 w-20 rounded-full bg-muted-foreground/30" />
+            <div className="h-1 w-0 mt-2" />
+            <div className="h-1.5 w-28 rounded-full bg-muted-foreground/30" />
+            <div className="h-1.5 w-24 rounded-full bg-muted-foreground/30" />
+            <div className="h-1 w-0 mt-3" />
+            <div className="h-1.5 w-14 rounded-full bg-primary/40" />
+            <div className="h-1.5 w-10 rounded-full bg-muted-foreground/40" />
+          </div>
+
+          {/* Scanning line */}
+          <div
+            className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent opacity-80 shadow-[0_0_6px_2px_hsl(var(--primary)/0.4)]"
+            style={{ animation: 'visionScanLine 2s ease-in-out infinite' }}
+          />
+
+          {/* Corner accent brackets */}
+          <div className="absolute top-1.5 left-1.5 w-3 h-3 border-t-2 border-l-2 border-primary/60 rounded-tl" />
+          <div className="absolute top-1.5 right-1.5 w-3 h-3 border-t-2 border-r-2 border-primary/60 rounded-tr" />
+          <div className="absolute bottom-1.5 left-1.5 w-3 h-3 border-b-2 border-l-2 border-primary/60 rounded-bl" />
+          <div className="absolute bottom-1.5 right-1.5 w-3 h-3 border-b-2 border-r-2 border-primary/60 rounded-br" />
+        </div>
+
+        {/* FileSearch icon badge */}
+        <div className="absolute -bottom-3 -right-3 p-1.5 rounded-full bg-primary text-primary-foreground shadow-md">
+          <FileSearch className="h-3.5 w-3.5" />
+        </div>
+      </div>
+
+      {/* CSS keyframe for the scanning line */}
+      <style>{`
+        @keyframes visionScanLine {
+          0%   { top: 8px;  opacity: 0; }
+          10%  { opacity: 1; }
+          90%  { opacity: 1; }
+          100% { top: calc(100% - 8px); opacity: 0; }
+        }
+      `}</style>
+
+      {/* Text content */}
+      <div className="text-center space-y-2 max-w-xs">
+        <p className="text-sm font-semibold text-foreground leading-snug">
+          Sedang menganalisis tata letak
+        </p>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          AI sedang mengenali struktur surat, posisi teks, tipografi, margin, dan elemen lainnya. Proses ini mungkin membutuhkan beberapa saat.
+        </p>
+      </div>
+
+      {/* Animated dots */}
+      <div className="flex items-center gap-1.5">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="inline-block w-1.5 h-1.5 rounded-full bg-primary/60"
+            style={{ animation: `visionDot 1.4s ease-in-out ${i * 0.22}s infinite` }}
+          />
+        ))}
+      </div>
+      <style>{`
+        @keyframes visionDot {
+          0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+          40%            { transform: scale(1.2); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  )
+}
 
 export function VisualLayoutEditorModal({
   open,
@@ -1012,116 +1105,114 @@ export function VisualLayoutEditorModal({
                 </div>
               </TabsContent>
 
+
               {/* TAB 3: AI Vision Generator */}
               <TabsContent value="vision" className="flex-1 overflow-y-auto p-4 space-y-4 m-0">
-                <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
-                  <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                    <Sparkles className="h-4 w-4" />
-                    <h4 className="text-xs font-bold">Generate Template dari Gambar Surat</h4>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    Unggah foto surat fisik atau screenshot surat lamaran kerja. AI Vision akan menganalisis tata letak, posisi tanggal, alamat tujuan, biodata, dan tanda tangan agar otomatis tersusun menjadi template visual.
-                  </p>
-                </div>
 
-                {/* Upload Image Dropzone */}
-                <input
-                  ref={visionFileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleImageFileChange}
-                  className="hidden"
-                  disabled={isAnalyzingImage}
-                />
-
-                <div
-                  onClick={() => !isAnalyzingImage && visionFileInputRef.current?.click()}
-                  className="p-6 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-muted/40 cursor-pointer transition-all flex flex-col items-center justify-center text-center group"
-                >
-                  <div className="p-2.5 rounded-xl bg-primary/10 text-primary mb-2 group-hover:scale-105 transition-transform">
-                    <Upload className="h-5 w-5" />
-                  </div>
-                  <span className="text-xs font-semibold text-foreground">
-                    {visionImage ? visionImage.name : 'Pilih Gambar Surat Lamaran'}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5">
-                    Mendukung JPG, PNG, WebP (Maks 8MB)
-                  </span>
-                </div>
-
-                {/* Image Preview if selected */}
-                {visionImagePreview && (
-                  <div className="rounded-xl border border-border/80 overflow-hidden bg-card p-2 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-                      <span>Pratinjau Gambar:</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVisionImage(null)
-                          setVisionImagePreview(null)
-                        }}
-                        className="text-[10px] text-destructive hover:underline"
-                        disabled={isAnalyzingImage}
-                      >
-                        Hapus Gambar
-                      </button>
+                {/* ── LOADER: shown while AI is processing ── */}
+                {isAnalyzingImage ? (
+                  <VisionAnalyzingLoader />
+                ) : (
+                  <>
+                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-3">
+                      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                        <Sparkles className="h-4 w-4" />
+                        <h4 className="text-xs font-bold">Generate Template dari Gambar Surat</h4>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Unggah foto surat fisik atau screenshot surat lamaran kerja. AI Vision akan menganalisis tata letak, posisi tanggal, alamat tujuan, biodata, dan tanda tangan agar otomatis tersusun menjadi template visual.
+                      </p>
                     </div>
-                    <img
-                      src={visionImagePreview}
-                      alt="Surat Lamaran"
-                      className="w-full max-h-48 object-contain rounded-lg border border-border/50 bg-black/5"
+
+                    {/* Upload Image Dropzone */}
+                    <input
+                      ref={visionFileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleImageFileChange}
+                      className="hidden"
                     />
-                  </div>
-                )}
 
-                {/* Optional Custom API Key Toggle */}
-                <div className="pt-1 space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                      className="hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+                    <div
+                      onClick={() => visionFileInputRef.current?.click()}
+                      className="p-6 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-muted/40 cursor-pointer transition-all flex flex-col items-center justify-center text-center group"
                     >
-                      <Key className="h-3 w-3" />
-                      <span>{showApiKeyInput ? 'Sembunyikan Input API Key' : 'Punya Google Gemini API Key Sendiri?'}</span>
-                    </button>
-                  </div>
-
-                  {showApiKeyInput && (
-                    <div className="p-3 rounded-lg border border-border/70 bg-card space-y-1.5 animate-in fade-in-50">
-                      <Label className="text-[11px] text-muted-foreground">
-                        Gemini API Key (Opsional jika server belum disetel)
-                      </Label>
-                      <Input
-                        type="password"
-                        value={visionApiKey}
-                        onChange={(e) => setVisionApiKey(e.target.value)}
-                        placeholder="AIzaSy..."
-                        className="h-8 text-xs font-mono"
-                      />
+                      <div className="p-2.5 rounded-xl bg-primary/10 text-primary mb-2 group-hover:scale-105 transition-transform">
+                        <Upload className="h-5 w-5" />
+                      </div>
+                      <span className="text-xs font-semibold text-foreground">
+                        {visionImage ? visionImage.name : 'Pilih Gambar Surat Lamaran'}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5">
+                        Mendukung JPG, PNG, WebP (Maks 8MB)
+                      </span>
                     </div>
-                  )}
-                </div>
 
-                {/* Action button */}
-                <Button
-                  type="button"
-                  onClick={handleAnalyzeVision}
-                  disabled={!visionImage || isAnalyzingImage}
-                  className="w-full gap-2 shadow-xs text-xs h-9 bg-amber-600 hover:bg-amber-700 text-white"
-                >
-                  {isAnalyzingImage ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Menganalisis Tata Letak Gambar...</span>
-                    </>
-                  ) : (
-                    <>
+                    {/* Image Preview if selected */}
+                    {visionImagePreview && (
+                      <div className="rounded-xl border border-border/80 overflow-hidden bg-card p-2 space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                          <span>Pratinjau Gambar:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVisionImage(null)
+                              setVisionImagePreview(null)
+                            }}
+                            className="text-[10px] text-destructive hover:underline"
+                          >
+                            Hapus Gambar
+                          </button>
+                        </div>
+                        <img
+                          src={visionImagePreview}
+                          alt="Surat Lamaran"
+                          className="w-full max-h-48 object-contain rounded-lg border border-border/50 bg-black/5"
+                        />
+                      </div>
+                    )}
+
+                    {/* Optional Custom API Key Toggle */}
+                    <div className="pt-1 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                          className="hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Key className="h-3 w-3" />
+                          <span>{showApiKeyInput ? 'Sembunyikan Input API Key' : 'Punya Google Gemini API Key Sendiri?'}</span>
+                        </button>
+                      </div>
+
+                      {showApiKeyInput && (
+                        <div className="p-3 rounded-lg border border-border/70 bg-card space-y-1.5 animate-in fade-in-50">
+                          <Label className="text-[11px] text-muted-foreground">
+                            Gemini API Key (Opsional jika server belum disetel)
+                          </Label>
+                          <Input
+                            type="password"
+                            value={visionApiKey}
+                            onChange={(e) => setVisionApiKey(e.target.value)}
+                            placeholder="AIzaSy..."
+                            className="h-8 text-xs font-mono"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action button */}
+                    <Button
+                      type="button"
+                      onClick={handleAnalyzeVision}
+                      disabled={!visionImage}
+                      className="w-full gap-2 shadow-xs text-xs h-9 bg-amber-600 hover:bg-amber-700 text-white"
+                    >
                       <Sparkles className="h-4 w-4" />
                       <span>Analisis Tata Letak dengan AI Vision</span>
-                    </>
-                  )}
-                </Button>
+                    </Button>
+                  </>
+                )}
               </TabsContent>
             </Tabs>
           </div>
