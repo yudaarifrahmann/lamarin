@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { ThemeToggle } from '@/components/theme/theme-toggle'
 import { GoogleAuthButton } from '@/components/auth/google-auth-button'
+import { Footer } from '@/components/layout/footer'
 
 const initialState: AuthState = {
   error: null,
@@ -23,13 +24,14 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = React.useState(false)
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-gradient-to-b from-background via-muted/20 to-background">
+    <div className="relative min-h-screen flex flex-col justify-between bg-gradient-to-b from-background via-muted/20 to-background">
       {/* Top Navigation bar with Theme Toggle */}
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+      <div className="w-full flex items-center justify-end p-4 sm:p-6">
         <ThemeToggle />
       </div>
 
-      <div className="w-full max-w-md space-y-6 animate-in fade-in-50 duration-300">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+        <div className="w-full max-w-md space-y-6 animate-in fade-in-50 duration-300">
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center space-y-2">
           <div className="h-12 w-12 rounded-2xl bg-primary flex items-center justify-center text-primary-foreground shadow-md mb-1">
@@ -215,11 +217,14 @@ export default function RegisterPage() {
           <p>Dilindungi oleh Supabase Row-Level Security (RLS) & OTP email resmi.</p>
           <p>
             <Link href="/privacy" className="underline hover:text-foreground transition-colors">
-              Kebijakan Privasi
+              Kebijakan Privasi (Privacy Policy)
             </Link>
           </p>
         </div>
       </div>
+      </div>
+
+      <Footer variant="compact" />
     </div>
   )
 }

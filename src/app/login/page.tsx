@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { ThemeToggle } from '@/components/theme/theme-toggle'
 import { GoogleAuthButton } from '@/components/auth/google-auth-button'
+import { Footer } from '@/components/layout/footer'
 
 const initialState: AuthState = {
   error: null,
@@ -187,22 +188,26 @@ function LoginFormContent() {
 
 export default function LoginPage() {
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-gradient-to-b from-background via-muted/20 to-background">
+    <div className="relative min-h-screen flex flex-col justify-between bg-gradient-to-b from-background via-muted/20 to-background">
       {/* Top Navigation bar with Theme Toggle */}
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+      <div className="w-full flex items-center justify-end p-4 sm:p-6">
         <ThemeToggle />
       </div>
 
-      <Suspense
-        fallback={
-          <div className="w-full max-w-md p-8 rounded-xl border border-border bg-card flex flex-col items-center justify-center gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-xs text-muted-foreground">Memuat halaman login...</p>
-          </div>
-        }
-      >
-        <LoginFormContent />
-      </Suspense>
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+        <Suspense
+          fallback={
+            <div className="w-full max-w-md p-8 rounded-xl border border-border bg-card flex flex-col items-center justify-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-xs text-muted-foreground">Memuat halaman login...</p>
+            </div>
+          }
+        >
+          <LoginFormContent />
+        </Suspense>
+      </div>
+
+      <Footer variant="compact" />
     </div>
   )
 }

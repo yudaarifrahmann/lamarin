@@ -27,8 +27,8 @@ export function Footer({ className, variant = 'default' }: FooterProps) {
             href="/privacy"
             className="hover:text-foreground underline underline-offset-4 transition-colors font-medium inline-flex items-center gap-1"
           >
-            <Shield className="h-3 w-3" />
-            <span>Kebijakan Privasi</span>
+            <Shield className="h-3 w-3 text-primary" />
+            <span>Kebijakan Privasi (Privacy Policy)</span>
           </Link>
           <span>&bull;</span>
           <span className="inline-flex items-center gap-1 text-[11px]">
@@ -98,7 +98,7 @@ export function Footer({ className, variant = 'default' }: FooterProps) {
             className="font-medium text-foreground hover:text-primary transition-colors inline-flex items-center gap-1 underline underline-offset-4"
           >
             <Shield className="h-3.5 w-3.5 text-primary" />
-            <span>Kebijakan Privasi</span>
+            <span>Kebijakan Privasi (Privacy Policy)</span>
           </Link>
         </div>
       </div>

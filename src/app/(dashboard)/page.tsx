@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Clock,
   ExternalLink,
+  Shield,
 } from 'lucide-react'
 import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
@@ -180,6 +181,17 @@ export default async function DashboardPage() {
                   </Badge>
                 </Link>
               )}
+
+              {/* Tautan Kebijakan Privasi */}
+              <Link href="/privacy">
+                <Badge
+                  variant="outline"
+                  className="text-xs px-2.5 py-0.5 gap-1.5 border-border/80 bg-muted/40 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  <Shield className="h-3 w-3 text-primary" />
+                  <span>Kebijakan Privasi</span>
+                </Badge>
+              </Link>
             </div>
 
             <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
