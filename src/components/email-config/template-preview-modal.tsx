@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Sparkles, Building2, User } from 'lucide-react'
+import { Sparkles, Building2, User, Briefcase } from 'lucide-react'
 import type { EmailTemplateRow } from '@/types/config'
 import { replacePlaceholders } from '@/lib/placeholders'
 import {
@@ -31,17 +31,20 @@ export function TemplatePreviewModal({
   senderName,
 }: TemplatePreviewModalProps) {
   const [testCompany, setTestCompany] = React.useState('PT Inovasi Digital Indonesia')
+  const [testPosition, setTestPosition] = React.useState('Software Engineer')
 
   if (!template) return null
 
   const previewSubject = replacePlaceholders(template.subject, {
     sender_name: senderName || 'Nama Pengirim',
     company_name: testCompany || 'Nama Perusahaan',
+    position: testPosition || 'Software Engineer',
   })
 
   const previewMessage = replacePlaceholders(template.message, {
     sender_name: senderName || 'Nama Pengirim',
     company_name: testCompany || 'Nama Perusahaan',
+    position: testPosition || 'Software Engineer',
   })
 
   return (
@@ -64,19 +67,34 @@ export function TemplatePreviewModal({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Test Company Name Field */}
-        <div className="p-3 rounded-lg border border-border/80 bg-muted/20 space-y-1.5">
-          <Label htmlFor="preview-company" className="text-xs font-medium flex items-center gap-1.5">
-            <Building2 className="h-3.5 w-3.5 text-primary" />
-            <span>Uji Coba Ganti Nama Perusahaan ({'{company_name}'}):</span>
-          </Label>
-          <Input
-            id="preview-company"
-            value={testCompany}
-            onChange={(e) => setTestCompany(e.target.value)}
-            placeholder="Ketik nama perusahaan untuk menguji placeholder..."
-            className="h-8 text-xs bg-background"
-          />
+        {/* Test Company & Position Fields */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 rounded-lg border border-border/80 bg-muted/20">
+          <div className="space-y-1">
+            <Label htmlFor="preview-company" className="text-[11px] font-medium flex items-center gap-1">
+              <Building2 className="h-3 w-3 text-primary" />
+              <span>{`{{company_name}}`}:</span>
+            </Label>
+            <Input
+              id="preview-company"
+              value={testCompany}
+              onChange={(e) => setTestCompany(e.target.value)}
+              placeholder="PT Contoh..."
+              className="h-7 text-xs bg-background"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="preview-position" className="text-[11px] font-medium flex items-center gap-1">
+              <Briefcase className="h-3 w-3 text-primary" />
+              <span>{`{{position}}`}:</span>
+            </Label>
+            <Input
+              id="preview-position"
+              value={testPosition}
+              onChange={(e) => setTestPosition(e.target.value)}
+              placeholder="Software Engineer..."
+              className="h-7 text-xs bg-background"
+            />
+          </div>
         </div>
 
         {/* Email Envelope */}

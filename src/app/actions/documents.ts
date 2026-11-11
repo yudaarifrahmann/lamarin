@@ -76,24 +76,69 @@ export async function uploadDocumentAction(formData: FormData): Promise<ActionRe
       return { success: false, error: `Gagal mengunggah file ke Storage: ${uploadError.message}` }
     }
 
-    // 6. Save metadata record to PostgreSQL documents table
-    const { data: dbData, error: dbError } = await supabase
-      .from('documents')
-      .insert({
-        user_id: user.id,
-        document_name: documentName,
-        original_filename: file.name,
-        storage_path: storagePath,
-        mime_type: mimeType,
-        file_size: file.size,
-      })
-      .select()
-      .single()
+    // 6. Determine next sort_order for this user (max + 1)
+    let nextSortOrder: number | null = null
+    try {
+      const { data: maxOrderData, error: maxOrderError } = await supabase
+        .from('documents')
+        .select('sort_order')
+        .eq('user_id', user.id)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-    if (dbError) {
+      if (!maxOrderError && maxOrderData) {
+        nextSortOrder = maxOrderData.sort_order != null ? maxOrderData.sort_order + 1 : 1
+      } else if (!maxOrderError) {
+        nextSortOrder = 1
+      }
+    } catch {
+      nextSortOrder = null
+    }
+
+    // 7. Save metadata record to PostgreSQL documents table
+    const baseInsertPayload = {
+      user_id: user.id,
+      document_name: documentName,
+      original_filename: file.name,
+      storage_path: storagePath,
+      mime_type: mimeType,
+      file_size: file.size,
+    }
+
+    let dbData: DocumentRow | null = null
+    let dbError: { message: string } | null = null
+
+    if (nextSortOrder !== null) {
+      const resultWithOrder = await supabase
+        .from('documents')
+        .insert({
+          ...baseInsertPayload,
+          sort_order: nextSortOrder,
+        })
+        .select()
+        .single()
+
+      dbData = resultWithOrder.data
+      dbError = resultWithOrder.error
+    }
+
+    // Fallback: If sort_order column is not yet present in PostgREST schema cache
+    if (!dbData && (nextSortOrder === null || (dbError && dbError.message.includes('sort_order')))) {
+      const fallbackResult = await supabase
+        .from('documents')
+        .insert(baseInsertPayload)
+        .select()
+        .single()
+
+      dbData = fallbackResult.data
+      dbError = fallbackResult.error
+    }
+
+    if (dbError || !dbData) {
       // Rollback: delete uploaded file from storage if DB insert fails
       await supabase.storage.from(STORAGE_BUCKET).remove([storagePath])
-      return { success: false, error: `Gagal menyimpan metadata dokumen: ${dbError.message}` }
+      return { success: false, error: `Gagal menyimpan metadata dokumen: ${dbError?.message}` }
     }
 
     revalidatePath('/manajemen-dokumen')
@@ -231,6 +276,91 @@ export async function getSignedUrlAction(
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Gagal mengakses berkas dokumen.',
+    }
+  }
+}
+
+/**
+ * Server Action: Batch update sort_order for a user's documents
+ */
+export async function updateDocumentOrdersAction(
+  orders: { id: string; sort_order: number }[]
+): Promise<ActionResponse<null>> {
+  try {
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return { success: false, error: 'Sesi login telah berakhir. Silakan login kembali.' }
+    }
+
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return { success: false, error: 'Data urutan dokumen kosong.' }
+    }
+
+    // Validate each entry
+    for (const item of orders) {
+      if (!item.id || typeof item.id !== 'string') {
+        return { success: false, error: 'ID dokumen tidak valid.' }
+      }
+      if (!Number.isInteger(item.sort_order) || item.sort_order <= 0) {
+        return { success: false, error: 'Nomor urutan harus berupa bilangan bulat positif (minimal 1).' }
+      }
+    }
+
+    // Validate no duplicates
+    const orderNums = orders.map((o) => o.sort_order)
+    if (new Set(orderNums).size !== orderNums.length) {
+      return { success: false, error: 'Terdapat nomor urutan yang sama (duplikat). Setiap dokumen harus memiliki nomor urutan yang berbeda.' }
+    }
+
+    // Validate sequential starting from 1
+    const sortedNums = [...orderNums].sort((a, b) => a - b)
+    if (sortedNums[0] !== 1) {
+      return { success: false, error: `Nomor urutan harus dimulai dari angka 1 (saat ini dimulai dari ${sortedNums[0]}).` }
+    }
+    for (let i = 0; i < sortedNums.length; i++) {
+      if (sortedNums[i] !== i + 1) {
+        return { success: false, error: `Nomor urutan harus berurutan tanpa celah. Ditemukan celah pada nomor ${i + 1}.` }
+      }
+    }
+
+    // Verify all document IDs belong to current user
+    const docIds = orders.map((o) => o.id)
+    const { data: userDocs, error: fetchError } = await supabase
+      .from('documents')
+      .select('id')
+      .in('id', docIds)
+      .eq('user_id', user.id)
+
+    if (fetchError) {
+      return { success: false, error: `Gagal memverifikasi dokumen: ${fetchError.message}` }
+    }
+
+    if (!userDocs || userDocs.length !== docIds.length) {
+      return { success: false, error: 'Beberapa dokumen tidak ditemukan atau tidak memiliki akses.' }
+    }
+
+    // Batch update sort_order per document
+    for (const item of orders) {
+      const { error: updateError } = await supabase
+        .from('documents')
+        .update({ sort_order: item.sort_order })
+        .eq('id', item.id)
+        .eq('user_id', user.id)
+
+      if (updateError) {
+        return { success: false, error: `Gagal memperbarui urutan dokumen: ${updateError.message}` }
+      }
+    }
+
+    revalidatePath('/manajemen-dokumen')
+    revalidatePath('/kirim-lamaran')
+    return { success: true, data: null }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Gagal menyimpan urutan dokumen.',
     }
   }
 }

@@ -5,13 +5,13 @@ import Link from 'next/link'
 import {
   Search,
   Building2,
+  Briefcase,
   Mail,
   Calendar,
   Paperclip,
   CheckCircle2,
   Clock,
   AlertTriangle,
-  ShieldCheck,
   Eye,
   Trash2,
   Send,
@@ -21,16 +21,28 @@ import {
   Filter,
   X,
   Loader2,
+  ChevronDown,
+  XCircle,
+  Check,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { EmailLogRow, EmailLogStatus } from '@/types/application'
+import type { EmailLogRow, EmailLogStatus, ApplicationOutcomeStatus } from '@/types/application'
 import { formatDate } from '@/lib/format'
-import { deleteApplicationLogAction } from '@/app/actions/history'
+import { deleteApplicationLogAction, updateApplicationStatusAction } from '@/app/actions/history'
 import { ApplicationDetailModal } from '@/components/history/application-detail-modal'
 import { EmptyState } from '@/components/common/empty-state'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = 10
@@ -39,50 +51,171 @@ interface ApplicationHistoryListProps {
   initialLogs: EmailLogRow[]
 }
 
-function StatusBadge({ status }: { status: EmailLogStatus }) {
+/**
+ * Badge for Email Delivery Status (Kondisi Pengiriman Email)
+ * Terkirim / Diproses / Gagal
+ */
+export function DeliveryStatusBadge({ status }: { status: EmailLogStatus }) {
   switch (status) {
     case 'sent':
+    case 'delivered':
       return (
         <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] gap-1 px-2 py-0.5">
-          <CheckCircle2 className="h-3 w-3" />
-          <span>Terkirim</span>
+          <CheckCircle2 className="h-3 w-3 shrink-0" />
+          <span>Pengiriman: Terkirim</span>
         </Badge>
       )
     case 'queued':
       return (
-        <Badge variant="secondary" className="bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] gap-1 px-2 py-0.5 border border-amber-500/30">
-          <Clock className="h-3 w-3" />
-          <span>Diproses</span>
-        </Badge>
-      )
-    case 'delivered':
-      return (
-        <Badge className="bg-purple-600 hover:bg-purple-600 text-white text-[10px] gap-1 px-2 py-0.5">
-          <ShieldCheck className="h-3 w-3" />
-          <span>Diterima</span>
+        <Badge
+          variant="secondary"
+          className="bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] gap-1 px-2 py-0.5 border border-amber-500/30"
+        >
+          <Clock className="h-3 w-3 shrink-0" />
+          <span>Pengiriman: Diproses</span>
         </Badge>
       )
     case 'failed':
-      return (
-        <Badge variant="destructive" className="text-[10px] gap-1 px-2 py-0.5">
-          <AlertTriangle className="h-3 w-3" />
-          <span>Gagal</span>
-        </Badge>
-      )
     case 'bounced':
       return (
-        <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 text-muted-foreground">
-          <X className="h-3 w-3" />
-          <span>Bounced</span>
+        <Badge variant="destructive" className="text-[10px] gap-1 px-2 py-0.5">
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          <span>Pengiriman: Gagal</span>
         </Badge>
       )
     default:
       return (
         <Badge variant="outline" className="text-[10px] px-2 py-0.5">
-          {status}
+          Pengiriman: {status}
         </Badge>
       )
   }
+}
+
+/**
+ * Dropdown selector for Application Outcome Status (Status Hasil Lamaran)
+ * Pending / Diterima / Ditolak
+ */
+export function ApplicationStatusDropdown({
+  currentStatus,
+  isUpdating,
+  onSelectStatus,
+}: {
+  currentStatus: ApplicationOutcomeStatus
+  isUpdating: boolean
+  onSelectStatus: (status: ApplicationOutcomeStatus) => void
+}) {
+  const renderTriggerBadge = () => {
+    switch (currentStatus) {
+      case 'accepted':
+        return (
+          <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] gap-1 px-2 py-0.5 cursor-pointer shadow-2xs transition-colors">
+            <CheckCircle2 className="h-3 w-3 shrink-0" />
+            <span className="font-semibold">Lamaran: Diterima</span>
+            <ChevronDown className="h-2.5 w-2.5 opacity-80" />
+          </Badge>
+        )
+      case 'rejected':
+        return (
+          <Badge
+            variant="destructive"
+            className="text-[10px] gap-1 px-2 py-0.5 cursor-pointer shadow-2xs hover:bg-destructive/90 transition-colors"
+          >
+            <XCircle className="h-3 w-3 shrink-0" />
+            <span className="font-semibold">Lamaran: Ditolak</span>
+            <ChevronDown className="h-2.5 w-2.5 opacity-80" />
+          </Badge>
+        )
+      case 'pending':
+      default:
+        return (
+          <Badge
+            variant="outline"
+            className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] gap-1 px-2 py-0.5 cursor-pointer hover:bg-amber-500/20 shadow-2xs transition-colors"
+          >
+            <Clock className="h-3 w-3 shrink-0" />
+            <span className="font-semibold">Lamaran: Pending</span>
+            <ChevronDown className="h-2.5 w-2.5 opacity-80" />
+          </Badge>
+        )
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            disabled={isUpdating}
+            className="inline-flex items-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer disabled:opacity-50"
+            title="Klik untuk mengubah status hasil lamaran"
+          />
+        }
+      >
+        {isUpdating ? (
+          <Badge
+            variant="outline"
+            className="text-[10px] gap-1 px-2 py-0.5 text-muted-foreground animate-pulse"
+          >
+            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+            <span>Menyimpan...</span>
+          </Badge>
+        ) : (
+          renderTriggerBadge()
+        )}
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Ubah Status Hasil Lamaran
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={() => onSelectStatus('pending')}
+          className="gap-2 cursor-pointer text-xs"
+        >
+          <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+          <div className="flex-1">
+            <span className="font-medium">Pending</span>
+            <span className="text-[10px] text-muted-foreground block">Menunggu tanggapan</span>
+          </div>
+          {currentStatus === 'pending' && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => onSelectStatus('accepted')}
+          className="gap-2 cursor-pointer text-xs text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 dark:focus:text-emerald-400"
+        >
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+          <div className="flex-1">
+            <span className="font-medium">Diterima</span>
+            <span className="text-[10px] text-muted-foreground block">Lolos seleksi / diterima</span>
+          </div>
+          {currentStatus === 'accepted' && (
+            <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+          )}
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => onSelectStatus('rejected')}
+          className="gap-2 cursor-pointer text-xs text-destructive focus:text-destructive"
+        >
+          <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
+          <div className="flex-1">
+            <span className="font-medium">Ditolak</span>
+            <span className="text-[10px] text-muted-foreground block">Belum berhasil</span>
+          </div>
+          {currentStatus === 'rejected' && (
+            <Check className="h-3.5 w-3.5 text-destructive shrink-0" />
+          )}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 function getAttachmentCount(log: EmailLogRow): number {
@@ -99,8 +232,10 @@ function getAttachmentCount(log: EmailLogRow): number {
 }
 
 export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListProps) {
+  const [logs, setLogs] = React.useState<EmailLogRow[]>(initialLogs)
   const [search, setSearch] = React.useState('')
-  const [statusFilter, setStatusFilter] = React.useState<EmailLogStatus | ''>('')
+  const [deliveryFilter, setDeliveryFilter] = React.useState<EmailLogStatus | ''>('')
+  const [outcomeFilter, setOutcomeFilter] = React.useState<ApplicationOutcomeStatus | ''>('')
   const [dateFrom, setDateFrom] = React.useState('')
   const [dateTo, setDateTo] = React.useState('')
   const [currentPage, setCurrentPage] = React.useState(1)
@@ -108,43 +243,102 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
   const [detailOpen, setDetailOpen] = React.useState(false)
   const [deleteTarget, setDeleteTarget] = React.useState<EmailLogRow | null>(null)
   const [deleting, setDeleting] = React.useState(false)
+  const [updatingLogId, setUpdatingLogId] = React.useState<string | null>(null)
+
+  // Keep internal state synchronized when initialLogs updates from server
+  React.useEffect(() => {
+    setLogs(initialLogs)
+  }, [initialLogs])
 
   // --- Filtering ---
   const filtered = React.useMemo(() => {
-    return initialLogs.filter((log) => {
+    return logs.filter((log) => {
       const q = search.toLowerCase()
       const matchesSearch =
         q === '' ||
         log.company_name.toLowerCase().includes(q) ||
+        (Boolean(log.position) && log.position.toLowerCase().includes(q)) ||
         log.recipient_email.toLowerCase().includes(q)
 
-      const matchesStatus = statusFilter === '' || log.status === statusFilter
+      const matchesDelivery = deliveryFilter === '' || log.status === deliveryFilter
+
+      const logOutcome = log.application_status || 'pending'
+      const matchesOutcome = outcomeFilter === '' || logOutcome === outcomeFilter
 
       const sentAt = log.sent_at || log.created_at
       const sentDate = sentAt ? sentAt.slice(0, 10) : ''
       const matchesFrom = dateFrom === '' || sentDate >= dateFrom
       const matchesTo = dateTo === '' || sentDate <= dateTo
 
-      return matchesSearch && matchesStatus && matchesFrom && matchesTo
+      return matchesSearch && matchesDelivery && matchesOutcome && matchesFrom && matchesTo
     })
-  }, [initialLogs, search, statusFilter, dateFrom, dateTo])
+  }, [logs, search, deliveryFilter, outcomeFilter, dateFrom, dateTo])
 
   // Reset to page 1 on filter change
   React.useEffect(() => {
     setCurrentPage(1)
-  }, [search, statusFilter, dateFrom, dateTo])
+  }, [search, deliveryFilter, outcomeFilter, dateFrom, dateTo])
 
   // --- Pagination ---
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
-  const hasActiveFilters = search !== '' || statusFilter !== '' || dateFrom !== '' || dateTo !== ''
+  const hasActiveFilters =
+    search !== '' ||
+    deliveryFilter !== '' ||
+    outcomeFilter !== '' ||
+    dateFrom !== '' ||
+    dateTo !== ''
 
   function resetFilters() {
     setSearch('')
-    setStatusFilter('')
+    setDeliveryFilter('')
+    setOutcomeFilter('')
     setDateFrom('')
     setDateTo('')
+  }
+
+  // --- Update Outcome Status ---
+  async function handleUpdateOutcome(logId: string, newStatus: ApplicationOutcomeStatus) {
+    const targetLog = logs.find((l) => l.id === logId)
+    const company = targetLog?.company_name || 'perusahaan'
+
+    setUpdatingLogId(logId)
+
+    // Optimistically update local list state
+    setLogs((prev) =>
+      prev.map((item) =>
+        item.id === logId ? { ...item, application_status: newStatus } : item
+      )
+    )
+
+    // Also update selectedLog if modal is currently open
+    if (selectedLog && selectedLog.id === logId) {
+      setSelectedLog((prev) => (prev ? { ...prev, application_status: newStatus } : null))
+    }
+
+    try {
+      const result = await updateApplicationStatusAction(logId, newStatus)
+      if (result.success) {
+        const labelMap: Record<ApplicationOutcomeStatus, string> = {
+          pending: 'Pending',
+          accepted: 'Diterima',
+          rejected: 'Ditolak',
+        }
+        toast.success(
+          `Status lamaran ke ${company} berhasil diperbarui menjadi "${labelMap[newStatus]}".`
+        )
+      } else {
+        // Rollback on failure
+        setLogs(initialLogs)
+        toast.error(result.error || 'Gagal memperbarui status hasil lamaran.')
+      }
+    } catch {
+      setLogs(initialLogs)
+      toast.error('Terjadi kesalahan jaringan saat memperbarui status.')
+    } finally {
+      setUpdatingLogId(null)
+    }
   }
 
   // --- Detail ---
@@ -165,6 +359,7 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
       const result = await deleteApplicationLogAction(deleteTarget.id)
       if (result.success) {
         toast.success('Riwayat lamaran berhasil dihapus.')
+        setLogs((prev) => prev.filter((item) => item.id !== deleteTarget.id))
         setDeleteTarget(null)
       } else {
         toast.error(result.error || 'Gagal menghapus riwayat lamaran.')
@@ -180,45 +375,60 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
     <>
       {/* Filter Bar */}
       <div className="flex flex-col gap-3">
-        {/* Search + Status */}
-        <div className="flex flex-col sm:flex-row items-stretch gap-2">
+        {/* Search + Selects */}
+        <div className="flex flex-col md:flex-row items-stretch gap-2">
+          {/* Search Input */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
               type="text"
-              placeholder="Cari perusahaan atau email penerima..."
+              placeholder="Cari perusahaan, posisi pekerjaan, atau email HRD..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 text-sm"
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Status select */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Filter Status Pengiriman */}
             <div className="relative">
               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as EmailLogStatus | '')}
-                className="h-9 pl-8 pr-8 rounded-md border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer appearance-none w-full sm:w-auto"
+                value={deliveryFilter}
+                onChange={(e) => setDeliveryFilter(e.target.value as EmailLogStatus | '')}
+                className="h-9 pl-8 pr-7 rounded-md border border-input bg-background text-xs sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer appearance-none"
+                title="Filter berdasarkan status pengiriman email"
               >
-                <option value="">Semua Status</option>
-                <option value="sent">Terkirim</option>
-                <option value="queued">Sedang Diproses</option>
-                <option value="delivered">Diterima</option>
-                <option value="failed">Gagal</option>
-                <option value="bounced">Bounced</option>
+                <option value="">Semua Pengiriman</option>
+                <option value="sent">Pengiriman: Terkirim</option>
+                <option value="queued">Pengiriman: Diproses</option>
+                <option value="failed">Pengiriman: Gagal</option>
               </select>
             </div>
 
-            {/* Reset filters */}
+            {/* Filter Status Hasil Lamaran */}
+            <div className="relative">
+              <select
+                value={outcomeFilter}
+                onChange={(e) => setOutcomeFilter(e.target.value as ApplicationOutcomeStatus | '')}
+                className="h-9 px-3 rounded-md border border-input bg-background text-xs sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                title="Filter berdasarkan status hasil lamaran"
+              >
+                <option value="">Semua Hasil Lamaran</option>
+                <option value="pending">Lamaran: Pending</option>
+                <option value="accepted">Lamaran: Diterima</option>
+                <option value="rejected">Lamaran: Ditolak</option>
+              </select>
+            </div>
+
+            {/* Reset Filters */}
             {hasActiveFilters && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={resetFilters}
-                className="gap-1.5 text-xs text-muted-foreground hover:text-foreground shrink-0"
+                className="gap-1.5 text-xs text-muted-foreground hover:text-foreground shrink-0 h-9"
               >
                 <X className="h-3.5 w-3.5" />
                 Reset
@@ -227,7 +437,7 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
           </div>
         </div>
 
-        {/* Date range */}
+        {/* Date range & Result count */}
         <div className="flex flex-col sm:flex-row items-center gap-2">
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -236,22 +446,23 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="h-9 px-3 rounded-md border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full sm:w-auto"
+              className="h-8 px-2.5 rounded-md border border-input bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full sm:w-auto"
             />
           </div>
+
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <span className="text-xs text-muted-foreground shrink-0">s.d.:</span>
             <input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="h-9 px-3 rounded-md border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full sm:w-auto"
+              className="h-8 px-2.5 rounded-md border border-input bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full sm:w-auto"
             />
           </div>
 
           {/* Result count */}
-          <span className="text-xs text-muted-foreground ml-auto">
-            {filtered.length} lamaran ditemukan
+          <span className="text-xs text-muted-foreground sm:ml-auto">
+            Menampilkan {filtered.length} dari {logs.length} lamaran
           </span>
         </div>
       </div>
@@ -259,7 +470,7 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
       {/* List */}
       {paginated.length === 0 ? (
         hasActiveFilters ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="flex flex-col items-center justify-center py-16 gap-3 border border-dashed rounded-xl bg-muted/20">
             <Search className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground text-center">
               Tidak ada riwayat yang cocok dengan filter yang dipilih.
@@ -285,59 +496,94 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
           />
         )
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           {paginated.map((log) => {
             const attachCount = getAttachmentCount(log)
             const sentAt = log.sent_at || log.created_at
+            const outcomeStatus: ApplicationOutcomeStatus = log.application_status || 'pending'
+            const isUpdatingThisLog = updatingLogId === log.id
+
             return (
               <div
                 key={log.id}
-                className="group relative rounded-xl border border-border/70 bg-card hover:border-primary/30 hover:shadow-sm transition-all duration-200 p-4"
+                className="group relative rounded-xl border border-border/70 bg-card hover:border-primary/40 hover:shadow-sm transition-all duration-200 p-4"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  {/* Left content */}
-                  <div className="flex-1 min-w-0 space-y-1">
-                    {/* Company + status */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  {/* Left content: Company, Position, Dual Status, and Meta */}
+                  <div className="flex-1 min-w-0 space-y-2">
+                    {/* Header Row: Company + Position */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Building2 className="h-4 w-4 text-primary shrink-0" />
-                      <span className="font-semibold text-sm text-foreground truncate">
-                        {log.company_name}
-                      </span>
-                      <StatusBadge status={log.status} />
-                    </div>
-
-                    {/* Recipient */}
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Mail className="h-3 w-3 shrink-0" />
-                      <span className="font-mono truncate">{log.recipient_email}</span>
-                    </div>
-
-                    {/* Subject */}
-                    <p className="text-xs text-foreground/70 truncate">
-                      <span className="text-muted-foreground">Subj: </span>
-                      {log.subject}
-                    </p>
-
-                    {/* Meta row */}
-                    <div className="flex items-center gap-3 pt-0.5">
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Calendar className="h-3 w-3" />
-                        <span>{formatDate(sentAt || log.created_at)}</span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Building2 className="h-4 w-4 text-primary shrink-0" />
+                        <span className="font-semibold text-sm text-foreground truncate">
+                          {log.company_name}
+                        </span>
                       </div>
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+
+                      {log.position && (
+                        <Badge
+                          variant="outline"
+                          className="text-[11px] gap-1 font-medium bg-muted/40 border-border/80 text-foreground/90"
+                        >
+                          <Briefcase className="h-3 w-3 text-primary" />
+                          <span>{log.position}</span>
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* DUA STATUS TERPISAH (Pemisahan Jelas Sesuai Permintaan) */}
+                    <div className="flex items-center gap-2.5 flex-wrap pt-0.5">
+                      {/* Status 1: Status Pengiriman Email */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground font-medium">Status Pengiriman:</span>
+                        <DeliveryStatusBadge status={log.status} />
+                      </div>
+
+                      <span className="text-muted-foreground/40 hidden sm:inline">•</span>
+
+                      {/* Status 2: Status Hasil Lamaran (Dapat diubah manual) */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground font-medium">Status Lamaran:</span>
+                        <ApplicationStatusDropdown
+                          currentStatus={outcomeStatus}
+                          isUpdating={isUpdatingThisLog}
+                          onSelectStatus={(newStatus) => handleUpdateOutcome(log.id, newStatus)}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Email Recipient & Subject */}
+                    <div className="space-y-0.5 text-xs text-muted-foreground pt-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="h-3 w-3 shrink-0" />
+                        <span className="font-mono truncate">{log.recipient_email}</span>
+                      </div>
+                      <p className="truncate text-foreground/75">
+                        <span className="text-muted-foreground">Subject: </span>
+                        {log.subject}
+                      </p>
+                    </div>
+
+                    {/* Meta row: Date & Attachments */}
+                    <div className="flex items-center gap-3 pt-1 text-[11px] text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        <span>{formatDate(sentAt)}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
                         <Paperclip className="h-3 w-3" />
                         <span>{attachCount} lampiran</span>
                       </div>
                       {log.status === 'failed' && (
-                        <span className="text-[10px] text-destructive font-medium">
+                        <span className="text-destructive font-medium">
                           Pengiriman gagal
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 shrink-0">
+                  {/* Actions Right */}
+                  <div className="flex items-center gap-2 shrink-0 self-end lg:self-center border-t lg:border-t-0 pt-2 lg:pt-0 w-full lg:w-auto justify-end">
                     <Button
                       type="button"
                       variant="outline"
@@ -427,6 +673,8 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
         log={selectedLog}
         open={detailOpen}
         onOpenChange={setDetailOpen}
+        onStatusChange={(logId, newStatus) => handleUpdateOutcome(logId, newStatus)}
+        isUpdatingStatus={updatingLogId === selectedLog?.id}
       />
 
       {/* Delete Confirmation */}
@@ -484,4 +732,3 @@ export function ApplicationHistoryList({ initialLogs }: ApplicationHistoryListPr
     </>
   )
 }
-

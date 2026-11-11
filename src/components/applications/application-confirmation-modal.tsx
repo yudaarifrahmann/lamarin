@@ -1,9 +1,10 @@
 'use client'
 
 import * as React from 'react'
-import { Send, AlertCircle, Loader2, Building2, Mail, Paperclip, User } from 'lucide-react'
+import { Send, AlertCircle, Loader2, Building2, Mail, Paperclip, User, Briefcase, FileCheck } from 'lucide-react'
 import type { DocumentRow } from '@/types/document'
 import { formatBytes } from '@/lib/format'
+import { isPdfDocument, generateMergedPdfFilename } from '@/lib/pdf/merger'
 import {
   Dialog,
   DialogContent,
@@ -20,10 +21,11 @@ interface ApplicationConfirmationModalProps {
   onOpenChange: (open: boolean) => void
   recipientEmail: string
   companyName: string
+  position: string
   resolvedSubject: string
   senderName: string
   senderEmail: string
-  selectedDocuments: DocumentRow[]
+  selectedDocuments: (DocumentRow & { order?: number })[]
   isSending: boolean
   onConfirmSend: () => void
 }
@@ -33,6 +35,7 @@ export function ApplicationConfirmationModal({
   onOpenChange,
   recipientEmail,
   companyName,
+  position,
   resolvedSubject,
   senderName,
   senderEmail,
@@ -44,6 +47,15 @@ export function ApplicationConfirmationModal({
     (acc, d) => acc + (d.file_size || 0),
     0
   )
+
+  const pdfDocs = selectedDocuments.filter((d) =>
+    isPdfDocument(d.mime_type, d.original_filename)
+  )
+  const nonPdfDocs = selectedDocuments.filter(
+    (d) => !isPdfDocument(d.mime_type, d.original_filename)
+  )
+  const isMerged = pdfDocs.length > 1
+  const mergedFilename = isMerged ? generateMergedPdfFilename(companyName) : null
 
   return (
     <Dialog open={open} onOpenChange={isSending ? undefined : onOpenChange}>
@@ -74,6 +86,16 @@ export function ApplicationConfirmationModal({
 
           <div className="flex items-start justify-between border-b border-border/50 pb-2">
             <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
+              <Briefcase className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>Posisi Dilamar:</span>
+            </span>
+            <span className="font-semibold text-foreground text-right truncate">
+              {position}
+            </span>
+          </div>
+
+          <div className="flex items-start justify-between border-b border-border/50 pb-2">
+            <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
               <Mail className="h-3.5 w-3.5 text-primary shrink-0" />
               <span>Penerima:</span>
             </span>
@@ -99,16 +121,79 @@ export function ApplicationConfirmationModal({
             </span>
           </div>
 
-          <div className="flex items-start justify-between pt-0.5">
-            <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
-              <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span>Lampiran:</span>
-            </span>
-            <div className="text-right">
-              <Badge variant="secondary" className="text-[10px]">
-                {selectedDocuments.length} Dokumen ({formatBytes(totalAttachmentBytes)})
-              </Badge>
+          <div className="space-y-2 pt-0.5">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
+                <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Lampiran Email:</span>
+              </span>
+              <div className="text-right">
+                <Badge variant="secondary" className="text-[10px]">
+                  {selectedDocuments.length === 0
+                    ? 'Tanpa Lampiran'
+                    : isMerged
+                    ? `1 PDF Gabungan (${pdfDocs.length} dok)${nonPdfDocs.length > 0 ? ` + ${nonPdfDocs.length} file` : ''}`
+                    : `${selectedDocuments.length} Dokumen`}
+                </Badge>
+              </div>
             </div>
+
+            {/* Display merged attachment name if merged */}
+            {isMerged && mergedFilename && (
+              <div className="p-2.5 rounded-lg bg-background border border-primary/20 space-y-2 text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <FileCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="font-mono font-medium truncate">{mergedFilename}</span>
+                  </div>
+                  <Badge variant="outline" className="text-[9px] shrink-0 text-primary border-primary/30">
+                    1 PDF Gabungan ({formatBytes(pdfDocs.reduce((a, d) => a + (d.file_size || 0), 0))})
+                  </Badge>
+                </div>
+                <div className="pl-5 space-y-1 text-muted-foreground text-[10px] border-t border-border/40 pt-1.5">
+                  <span className="font-medium text-foreground/80 block">Urutan Halaman Gabungan:</span>
+                  {pdfDocs.map((doc, idx) => (
+                    <div key={doc.id} className="flex items-center justify-between gap-2">
+                      <span className="truncate">
+                        <span className="text-primary font-mono font-semibold">#{doc.sort_order ?? doc.order ?? idx + 1}</span> {doc.document_name}
+                      </span>
+                      <span className="font-mono shrink-0">{formatBytes(doc.file_size)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Single PDF if not merged */}
+            {!isMerged && pdfDocs.length === 1 && (
+              <div className="p-2 rounded-md bg-background border border-border/70 flex items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 truncate">
+                  <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span className="truncate">
+                    <span className="text-primary font-mono font-semibold mr-1">#{pdfDocs[0].sort_order ?? pdfDocs[0].order ?? 1}</span>
+                    {pdfDocs[0].document_name}
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-muted-foreground shrink-0">{formatBytes(pdfDocs[0].file_size)}</span>
+              </div>
+            )}
+
+            {/* Non-PDF documents */}
+            {nonPdfDocs.map((doc, idx) => (
+              <div key={doc.id} className="p-2 rounded-md bg-background border border-border/70 flex items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 truncate">
+                  <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span className="truncate">
+                    <span className="text-primary font-mono font-semibold mr-1">
+                      #{doc.sort_order ?? doc.order ?? idx + 1}
+                    </span>
+                    {doc.document_name}
+                  </span>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0">Non-PDF</Badge>
+                </div>
+                <span className="text-[10px] font-mono text-muted-foreground shrink-0">{formatBytes(doc.file_size)}</span>
+              </div>
+            ))}
           </div>
         </div>
 

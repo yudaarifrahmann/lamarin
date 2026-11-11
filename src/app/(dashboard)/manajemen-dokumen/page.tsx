@@ -1,6 +1,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { FolderArchive, ArrowLeft, Shield, HardDrive, FileText } from 'lucide-react'
+import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import type { DocumentRow } from '@/types/document'
 import { formatBytes } from '@/lib/format'
@@ -8,18 +9,31 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DocumentManager } from '@/components/documents/document-manager'
 
+export const instant = false
+
 export default async function ManajemenDokumenPage() {
+  await connection()
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   let documents: DocumentRow[] = []
 
   if (user) {
-    const { data } = await supabase
+    let { data, error } = await supabase
       .from('documents')
       .select('*')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+
+    if (error && error.message.includes('sort_order')) {
+      const fallbackResult = await supabase
+        .from('documents')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      data = fallbackResult.data
+    }
 
     if (data) {
       documents = data as DocumentRow[]

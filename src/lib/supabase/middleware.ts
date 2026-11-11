@@ -49,16 +49,34 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const pathname = request.nextUrl.pathname
+  const isPublicRoute =
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/verify-otp' ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/api/auth')
 
   // 1. Unauthenticated users trying to access protected routes must be redirected to /login
-  if (!user && pathname !== '/login' && !pathname.startsWith('/auth')) {
+  if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
-  // 2. Authenticated users trying to access /login must be redirected to dashboard root (/)
-  if (user && pathname === '/login') {
+  // 2. If user is logged in but hasn't confirmed email yet, restrict access to protected dashboard
+  if (user && !user.email_confirmed_at) {
+    if (!isPublicRoute) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/verify-otp'
+      if (user.email) {
+        url.searchParams.set('email', user.email)
+      }
+      return NextResponse.redirect(url)
+    }
+  }
+
+  // 3. Fully confirmed authenticated users trying to access login or register must be redirected to dashboard root (/)
+  if (user && user.email_confirmed_at && (pathname === '/login' || pathname === '/register')) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)

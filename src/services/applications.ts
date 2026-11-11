@@ -51,6 +51,9 @@ export const applicationService = {
       queued: 0,
       delivered: 0,
       failed: 0,
+      pendingOutcome: 0,
+      acceptedOutcome: 0,
+      rejectedOutcome: 0,
     }
 
     if (userError || !user) {
@@ -59,7 +62,7 @@ export const applicationService = {
 
     const { data, error } = await supabase
       .from('email_logs')
-      .select('status')
+      .select('status, application_status')
       .eq('user_id', user.id)
 
     if (error || !data) {
@@ -72,6 +75,11 @@ export const applicationService = {
       if (log.status === 'queued') stats.queued += 1
       if (log.status === 'delivered') stats.delivered += 1
       if (log.status === 'failed') stats.failed += 1
+
+      const outcome = log.application_status || 'pending'
+      if (outcome === 'accepted') stats.acceptedOutcome = (stats.acceptedOutcome || 0) + 1
+      else if (outcome === 'rejected') stats.rejectedOutcome = (stats.rejectedOutcome || 0) + 1
+      else stats.pendingOutcome = (stats.pendingOutcome || 0) + 1
     })
 
     return { stats, error: null }

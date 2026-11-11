@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
   Send,
   Building2,
+  Briefcase,
   Mail,
   FileText,
   Paperclip,
@@ -13,15 +14,15 @@ import {
   Sparkles,
   AlertCircle,
   CheckCircle2,
-  ExternalLink,
   History,
-  Layers,
+  FileCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocumentRow } from '@/types/document'
 import type { EmailSettingsRow, EmailTemplateRow } from '@/types/config'
 import { formatBytes } from '@/lib/format'
 import { SUPPORTED_PLACEHOLDERS, replacePlaceholders } from '@/lib/placeholders'
+import { isPdfDocument, generateMergedPdfFilename } from '@/lib/pdf/merger'
 import { sendApplicationAction } from '@/app/actions/send-application'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -51,6 +52,7 @@ export function ApplicationForm({
   // Form states
   const [recipientEmail, setRecipientEmail] = React.useState('')
   const [companyName, setCompanyName] = React.useState('')
+  const [position, setPosition] = React.useState('')
   const [subject, setSubject] = React.useState('')
   const [message, setMessage] = React.useState('')
   const [selectedDocIds, setSelectedDocIds] = React.useState<string[]>([])
@@ -60,6 +62,7 @@ export function ApplicationForm({
   const [isSending, setIsSending] = React.useState(false)
   const [sentSuccessData, setSentSuccessData] = React.useState<{
     company: string
+    position: string
     email: string
     resendId: string
   } | null>(null)
@@ -70,7 +73,7 @@ export function ApplicationForm({
   const defaultSubjectFallback =
     defaultTemplate?.subject ||
     emailSettings?.default_subject ||
-    'Lamaran Pekerjaan - {sender_name} - {company_name}'
+    'Lamaran Pekerjaan: {{position}} - {{company_name}}'
 
   const defaultMessageFallback =
     defaultTemplate?.message || emailSettings?.default_message || ''
@@ -112,9 +115,11 @@ export function ApplicationForm({
 
   // Document selection toggles
   const handleToggleDoc = (docId: string) => {
-    setSelectedDocIds((prev) =>
-      prev.includes(docId) ? prev.filter((id) => id !== docId) : [...prev, docId]
-    )
+    if (selectedDocIds.includes(docId)) {
+      setSelectedDocIds((prev) => prev.filter((id) => id !== docId))
+    } else {
+      setSelectedDocIds((prev) => [...prev, docId])
+    }
   }
 
   const handleSelectAllDocs = () => {
@@ -125,10 +130,18 @@ export function ApplicationForm({
     setSelectedDocIds([])
   }
 
-  // Selected documents objects and total size
-  const selectedDocuments = userDocuments.filter((d) =>
-    selectedDocIds.includes(d.id)
-  )
+  // Selected documents objects sorted strictly by DB sort_order (then by created_at)
+  const selectedDocuments = React.useMemo(() => {
+    return selectedDocIds
+      .map((id) => userDocuments.find((d) => d.id === id))
+      .filter((doc): doc is DocumentRow => Boolean(doc))
+      .sort((a, b) => {
+        const orderA = a.sort_order ?? 9999
+        const orderB = b.sort_order ?? 9999
+        if (orderA !== orderB) return orderA - orderB
+        return a.created_at < b.created_at ? -1 : 1
+      })
+  }, [selectedDocIds, userDocuments])
 
   const totalAttachmentBytes = selectedDocuments.reduce(
     (acc, d) => acc + (d.file_size || 0),
@@ -136,17 +149,30 @@ export function ApplicationForm({
   )
   const isAttachmentSizeExceeded = totalAttachmentBytes > 25 * 1024 * 1024
 
+  // PDF Merge computations
+  const pdfDocs = selectedDocuments.filter((d) =>
+    isPdfDocument(d.mime_type, d.original_filename)
+  )
+  const nonPdfDocs = selectedDocuments.filter(
+    (d) => !isPdfDocument(d.mime_type, d.original_filename)
+  )
+  const isMergedPdf = pdfDocs.length > 1
+  const mergedPdfName = isMergedPdf ? generateMergedPdfFilename(companyName) : null
+  const mergedPdfSize = pdfDocs.reduce((acc, d) => acc + (d.file_size || 0), 0)
+
   // Live preview values
   const activeSubject = subject.trim() || defaultSubjectFallback
   const activeMessage = message.trim() || defaultMessageFallback
 
   const previewSubject = replacePlaceholders(activeSubject, {
     company_name: companyName || 'PT Target Perusahaan',
+    position: position || 'Software Engineer',
     sender_name: senderName,
   })
 
   const previewMessage = replacePlaceholders(activeMessage, {
     company_name: companyName || 'PT Target Perusahaan',
+    position: position || 'Software Engineer',
     sender_name: senderName,
   })
 
@@ -154,13 +180,18 @@ export function ApplicationForm({
   const handleOpenConfirmation = (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!recipientEmail.trim() || !recipientEmail.includes('@')) {
-      toast.error('Format email penerima tidak valid.')
+    if (!companyName.trim()) {
+      toast.error('Nama perusahaan wajib diisi.')
       return
     }
 
-    if (!companyName.trim()) {
-      toast.error('Nama perusahaan wajib diisi.')
+    if (!position.trim()) {
+      toast.error('Posisi yang dilamar wajib diisi.')
+      return
+    }
+
+    if (!recipientEmail.trim() || !recipientEmail.includes('@')) {
+      toast.error('Format email penerima tidak valid.')
       return
     }
 
@@ -186,9 +217,10 @@ export function ApplicationForm({
     const result = await sendApplicationAction({
       recipient_email: recipientEmail.trim(),
       company_name: companyName.trim(),
+      position: position.trim(),
       subject: subject.trim() || undefined,
       message: message.trim() || undefined,
-      selected_document_ids: selectedDocIds,
+      selected_document_ids: selectedDocuments.map((d) => d.id),
     })
 
     setIsSending(false)
@@ -201,6 +233,7 @@ export function ApplicationForm({
 
       setSentSuccessData({
         company: companyName.trim(),
+        position: position.trim(),
         email: recipientEmail.trim(),
         resendId: result.data.resendId,
       })
@@ -208,6 +241,7 @@ export function ApplicationForm({
       // Reset form
       setRecipientEmail('')
       setCompanyName('')
+      setPosition('')
       setSubject('')
       setMessage('')
       setSelectedDocIds([])
@@ -225,7 +259,7 @@ export function ApplicationForm({
             <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
             <div>
               <h4 className="text-sm font-semibold">
-                Lamaran ke {sentSuccessData.company} Berhasil Dikirim!
+                Lamaran Posisi &quot;{sentSuccessData.position}&quot; di {sentSuccessData.company} Berhasil Dikirim!
               </h4>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Terkirim ke <strong>{sentSuccessData.email}</strong>. ID Pesan: <code className="text-[11px] font-mono">{sentSuccessData.resendId}</code>
@@ -262,33 +296,55 @@ export function ApplicationForm({
               <div className="flex items-center gap-2">
                 <Building2 className="h-4 w-4 text-primary" />
                 <CardTitle className="text-base font-semibold">
-                  1 & 2. Data Penerima Lamaran
+                  1 &amp; 2. Data Perusahaan, Posisi &amp; Penerima
                 </CardTitle>
               </div>
               <CardDescription className="text-xs">
-                Masukkan informasi perusahaan dan alamat email HRD tujuan.
+                Masukkan informasi perusahaan, posisi pekerjaan yang dilamar, dan email HRD tujuan.
               </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="company_name" className="text-xs font-medium">
-                  Nama Perusahaan <span className="text-destructive">*</span>
-                </Label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    id="company_name"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="Contoh: PT Tokopedia Indonesia / Google Indonesia"
-                    className="pl-9 h-9 text-xs sm:text-sm"
-                    required
-                  />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="company_name" className="text-xs font-medium">
+                    Nama Perusahaan <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      id="company_name"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="Contoh: PT Inovasi Digital"
+                      className="pl-9 h-9 text-xs sm:text-sm"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Variabel: <code>{`{{company_name}}`}</code>
+                  </p>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Nama perusahaan ini akan otomatis menggantikan placeholder <code>{'{company_name}'}</code>.
-                </p>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="position" className="text-xs font-medium">
+                    Posisi yang Dilamar <span className="text-destructive">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      id="position"
+                      value={position}
+                      onChange={(e) => setPosition(e.target.value)}
+                      placeholder="Contoh: Frontend Developer"
+                      className="pl-9 h-9 text-xs sm:text-sm"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Variabel: <code>{`{{position}}`}</code>
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-1.5">
@@ -318,7 +374,7 @@ export function ApplicationForm({
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" />
                   <CardTitle className="text-base font-semibold">
-                    3 & 4. Subject & Isi Surat Lamaran
+                    3 &amp; 4. Subject &amp; Isi Surat Lamaran
                   </CardTitle>
                 </div>
 
@@ -369,7 +425,7 @@ export function ApplicationForm({
                   <Label htmlFor="app_message" className="text-xs font-medium">
                     Isi Surat Lamaran
                   </Label>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] text-muted-foreground">Sisipkan:</span>
                     {SUPPORTED_PLACEHOLDERS.map((p) => (
                       <button
@@ -436,11 +492,15 @@ export function ApplicationForm({
                 )}
               </div>
               <CardDescription className="text-xs">
-                Pilih dokumen dari Supabase Storage yang akan dilampirkan otomatis ke email HRD.
+                Pilih dokumen yang ingin dilampirkan. Urutan dokumen mengikuti pengaturan permanen di{' '}
+                <Link href="/manajemen-dokumen" className="text-primary hover:underline font-medium">
+                  Manajemen Dokumen
+                </Link>
+                . Beberapa file PDF akan otomatis digabung sesuai urutan nomor tersebut.
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               {userDocuments.length === 0 ? (
                 <div className="p-6 text-center rounded-xl border border-dashed border-border/80 bg-muted/20 space-y-2">
                   <Paperclip className="h-8 w-8 mx-auto text-muted-foreground/60" />
@@ -458,54 +518,95 @@ export function ApplicationForm({
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                  {userDocuments.map((doc) => {
-                    const isChecked = selectedDocIds.includes(doc.id)
+                <div className="space-y-3">
+                  {/* Documents List with Checkbox Only */}
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {userDocuments.map((doc, idx) => {
+                      const isChecked = selectedDocIds.includes(doc.id)
+                      const isPdf = isPdfDocument(doc.mime_type, doc.original_filename)
+                      const sortOrderNum = doc.sort_order ?? idx + 1
 
-                    return (
-                      <div
-                        key={doc.id}
-                        onClick={() => handleToggleDoc(doc.id)}
-                        className={`p-3 rounded-lg border transition-all flex items-center justify-between gap-3 cursor-pointer ${
-                          isChecked
-                            ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/20'
-                            : 'border-border/70 bg-card hover:bg-muted/40'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <Checkbox
-                            checked={isChecked}
-                            onCheckedChange={() => handleToggleDoc(doc.id)}
-                            className="shrink-0"
-                          />
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold text-foreground truncate">
-                              {doc.document_name}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground truncate font-mono">
-                              {doc.original_filename}
-                            </p>
+                      return (
+                        <div
+                          key={doc.id}
+                          className={`p-3 rounded-lg border transition-all flex items-center justify-between gap-3 ${
+                            isChecked
+                              ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/20'
+                              : 'border-border/70 bg-card hover:bg-muted/40'
+                          }`}
+                        >
+                          {/* Left: Order badge + Checkbox + Document Meta */}
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="text-xs font-mono font-bold text-primary/70 w-6 text-center shrink-0">
+                              #{sortOrderNum}
+                            </span>
+                            <Checkbox
+                              id={`checkbox-doc-${doc.id}`}
+                              checked={isChecked}
+                              onCheckedChange={() => handleToggleDoc(doc.id)}
+                              className="shrink-0"
+                            />
+                            <label
+                              htmlFor={`checkbox-doc-${doc.id}`}
+                              className="min-w-0 cursor-pointer select-none space-y-0.5"
+                            >
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-semibold text-foreground truncate">
+                                  {doc.document_name}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] px-1 py-0 font-medium ${
+                                    isPdf
+                                      ? 'border-red-500/30 text-red-600 dark:text-red-400'
+                                      : 'border-border text-muted-foreground'
+                                  }`}
+                                >
+                                  {isPdf ? 'PDF' : 'NON-PDF'}
+                                </Badge>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  ({formatBytes(doc.file_size)})
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground truncate font-mono">
+                                {doc.original_filename}
+                              </p>
+                            </label>
                           </div>
-                        </div>
 
-                        <Badge variant="outline" className="text-[10px] shrink-0 font-mono">
-                          {formatBytes(doc.file_size)}
-                        </Badge>
-                      </div>
-                    )
-                  })}
+                          {/* Right: Check / Uncheck status indicator */}
+                          {isChecked ? (
+                            <Check className="h-4 w-4 text-primary shrink-0" />
+                          ) : (
+                            <X className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
-              {/* Total attachment status */}
+              {/* Total attachment status & PDF merge badge */}
               {userDocuments.length > 0 && (
-                <div className="pt-2 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>
-                    <strong>{selectedDocuments.length}</strong> dokumen dipilih
-                  </span>
-                  <span className={isAttachmentSizeExceeded ? 'text-destructive font-semibold' : 'font-mono'}>
-                    Total: {formatBytes(totalAttachmentBytes)} / 25 MB
-                  </span>
+                <div className="pt-2 border-t border-border/50 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      <strong>{selectedDocuments.length}</strong> dokumen dipilih
+                    </span>
+                    <span className={isAttachmentSizeExceeded ? 'text-destructive font-semibold' : 'font-mono'}>
+                      Total: {formatBytes(totalAttachmentBytes)} / 25 MB
+                    </span>
+                  </div>
+
+                  {isMergedPdf && (
+                    <div className="p-2.5 rounded-lg border border-primary/20 bg-primary/5 text-xs text-primary flex items-center gap-2">
+                      <FileCheck className="h-4 w-4 shrink-0" />
+                      <span>
+                        <strong>{pdfDocs.length} dokumen PDF</strong> akan otomatis digabung menjadi 1 lampiran PDF: <code className="font-mono text-[11px] font-semibold">{mergedPdfName}</code> sesuai urutan di Manajemen Dokumen.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -554,21 +655,35 @@ export function ApplicationForm({
                 {/* Envelope */}
                 <div className="rounded-lg border border-border/70 bg-background/80 p-3 space-y-2 text-xs">
                   <div className="flex items-start justify-between border-b border-border/50 pb-1.5">
-                    <span className="text-muted-foreground w-16 shrink-0 font-medium">Dari:</span>
+                    <span className="text-muted-foreground w-20 shrink-0 font-medium">Dari:</span>
                     <span className="font-semibold text-foreground text-right truncate">
                       {senderName} {senderEmail ? `<${senderEmail}>` : ''}
                     </span>
                   </div>
 
                   <div className="flex items-start justify-between border-b border-border/50 pb-1.5">
-                    <span className="text-muted-foreground w-16 shrink-0 font-medium">Kepada:</span>
+                    <span className="text-muted-foreground w-20 shrink-0 font-medium">Perusahaan:</span>
+                    <span className="font-semibold text-foreground text-right truncate">
+                      {companyName || 'PT Target Perusahaan'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-between border-b border-border/50 pb-1.5">
+                    <span className="text-muted-foreground w-20 shrink-0 font-medium">Posisi:</span>
+                    <span className="font-semibold text-primary text-right truncate">
+                      {position || 'Software Engineer'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-start justify-between border-b border-border/50 pb-1.5">
+                    <span className="text-muted-foreground w-20 shrink-0 font-medium">Kepada:</span>
                     <span className="text-foreground text-right truncate font-mono">
                       {recipientEmail || 'hrd@perusahaan.com'}
                     </span>
                   </div>
 
                   <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground w-16 shrink-0 font-medium">Subject:</span>
+                    <span className="text-muted-foreground w-20 shrink-0 font-medium">Subject:</span>
                     <span className="font-semibold text-primary text-right truncate">
                       {previewSubject}
                     </span>
@@ -589,12 +704,12 @@ export function ApplicationForm({
                   )}
                 </div>
 
-                {/* Selected Attachments Pills in Preview */}
+                {/* Selected Attachments in Preview */}
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-3 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-foreground flex items-center gap-1.5">
                       <Paperclip className="h-3.5 w-3.5 text-primary" />
-                      <span>Lampiran Terpilih ({selectedDocuments.length})</span>
+                      <span>Lampiran Email ({isMergedPdf ? 1 + nonPdfDocs.length : selectedDocuments.length})</span>
                     </span>
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {formatBytes(totalAttachmentBytes)}
@@ -606,16 +721,70 @@ export function ApplicationForm({
                       Tidak ada dokumen yang dilampirkan.
                     </p>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
-                      {selectedDocuments.map((doc) => (
+                    <div className="space-y-2">
+                      {/* Merged PDF Card Preview */}
+                      {isMergedPdf && (
+                        <div className="p-2.5 rounded-lg bg-background border border-primary/30 shadow-2xs space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <FileCheck className="h-4 w-4 text-primary shrink-0" />
+                              <span className="text-xs font-semibold text-foreground truncate font-mono">
+                                {mergedPdfName}
+                              </span>
+                            </div>
+                            <Badge variant="secondary" className="text-[10px] shrink-0 bg-primary/10 text-primary border-primary/20">
+                              1 PDF Gabungan ({formatBytes(mergedPdfSize)})
+                            </Badge>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground pl-5 space-y-1 border-t border-border/40 pt-1.5">
+                            <span className="font-medium block text-foreground/80">Urutan Halaman PDF Gabungan:</span>
+                            {pdfDocs.map((doc, idx) => (
+                              <div key={doc.id} className="flex items-center justify-between gap-1.5 truncate">
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <span className="text-primary font-mono font-bold">#{doc.sort_order ?? idx + 1}</span>
+                                  <span className="truncate">{doc.document_name}</span>
+                                </div>
+                                <span className="font-mono text-muted-foreground shrink-0">({formatBytes(doc.file_size)})</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Single PDF if not merged */}
+                      {!isMergedPdf &&
+                        pdfDocs.map((doc, idx) => (
+                          <div
+                            key={doc.id}
+                            className="flex items-center justify-between p-2 rounded-md bg-background border border-border/80 text-xs font-medium text-foreground shadow-2xs"
+                          >
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="text-primary font-mono font-bold text-[11px]">#{doc.sort_order ?? idx + 1}</span>
+                              <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span className="truncate">{doc.document_name}</span>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                              {formatBytes(doc.file_size)}
+                            </span>
+                          </div>
+                        ))}
+
+                      {/* Non-PDF documents */}
+                      {nonPdfDocs.map((doc, idx) => (
                         <div
                           key={doc.id}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-background border border-border/80 text-[11px] font-medium text-foreground shadow-2xs"
+                          className="flex items-center justify-between p-2 rounded-md bg-background border border-border/80 text-xs font-medium text-foreground shadow-2xs"
                         >
-                          <Paperclip className="h-3 w-3 text-primary shrink-0" />
-                          <span className="truncate max-w-[140px]">{doc.document_name}</span>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            ({formatBytes(doc.file_size)})
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-primary font-mono font-bold text-[11px]">
+                              #{doc.sort_order ?? idx + 1}
+                            </span>
+                            <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="truncate">{doc.document_name}</span>
+                            <Badge variant="outline" className="text-[9px] px-1 py-0">Non-PDF</Badge>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                            {formatBytes(doc.file_size)}
                           </span>
                         </div>
                       ))}
@@ -634,6 +803,7 @@ export function ApplicationForm({
         onOpenChange={setIsConfirmOpen}
         recipientEmail={recipientEmail.trim()}
         companyName={companyName.trim()}
+        position={position.trim()}
         resolvedSubject={previewSubject}
         senderName={senderName}
         senderEmail={senderEmail}
@@ -644,4 +814,3 @@ export function ApplicationForm({
     </div>
   )
 }
-

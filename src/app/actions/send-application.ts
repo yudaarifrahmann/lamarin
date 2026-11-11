@@ -6,6 +6,7 @@ import { createGmailClientFromRefreshToken } from '@/lib/gmail/client'
 import { buildMimeMessage, type EmailAttachment } from '@/lib/gmail/mime'
 import { decryptToken } from '@/lib/encryption'
 import { replacePlaceholders } from '@/lib/placeholders'
+import { isPdfDocument, generateMergedPdfFilename, mergePdfBuffers } from '@/lib/pdf/merger'
 import type { ActionResponse } from '@/app/actions/documents'
 
 const STORAGE_BUCKET = 'application-documents'
@@ -14,9 +15,10 @@ const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024 // 25MB total limit for Gmail
 export interface SendApplicationPayload {
   recipient_email: string
   company_name: string
+  position: string
   subject?: string
   message?: string
-  selected_document_ids: string[]
+  selected_document_ids?: string[]
 }
 
 export interface SendApplicationResult {
@@ -65,21 +67,11 @@ function formatEmailHtml(message: string): string {
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .footer {
-      margin-top: 32px;
-      padding-top: 16px;
-      border-top: 1px solid #f3f4f6;
-      font-size: 12px;
-      color: #6b7280;
-    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="content">${sanitized}</div>
-    <div class="footer">
-      Email ini dikirimkan secara langsung melalui akun Gmail pelamar.
-    </div>
   </div>
 </body>
 </html>
@@ -154,10 +146,15 @@ export async function sendApplicationAction(
       return { success: false, error: 'Alamat email penerima tidak valid.' }
     }
 
-    // 5. Validate company name
+    // 5. Validate company name & job position
     const companyName = payload.company_name?.trim()
     if (!companyName) {
       return { success: false, error: 'Nama perusahaan wajib diisi.' }
+    }
+
+    const position = payload.position?.trim()
+    if (!position) {
+      return { success: false, error: 'Posisi yang dilamar wajib diisi.' }
     }
 
     // 6. Fetch user email_settings & default template from Supabase
@@ -187,10 +184,11 @@ export async function sendApplicationAction(
       payload.subject?.trim() ||
       defaultTemplate?.subject ||
       emailSettings?.default_subject ||
-      'Lamaran Pekerjaan - {sender_name} - {company_name}'
+      'Lamaran Pekerjaan: {{position}} - {{company_name}}'
 
     const resolvedSubject = replacePlaceholders(rawSubject, {
       company_name: companyName,
+      position: position,
       sender_name: senderName,
     })
 
@@ -210,11 +208,13 @@ export async function sendApplicationAction(
 
     const resolvedMessage = replacePlaceholders(rawMessage, {
       company_name: companyName,
+      position: position,
       sender_name: senderName,
     })
 
     // 9. Verify and Download Selected Documents from private Supabase Storage
-    const selectedDocIds = payload.selected_document_ids || []
+    const selectedDocIds = Array.from(new Set(payload.selected_document_ids || []))
+
     interface VerifiedDoc {
       id: string
       document_name: string
@@ -224,7 +224,6 @@ export async function sendApplicationAction(
       buffer: Buffer
     }
     const verifiedAttachments: VerifiedDoc[] = []
-    let totalAttachmentSize = 0
 
     if (selectedDocIds.length > 0) {
       const { data: userDocs, error: docsError } = await supabase
@@ -241,9 +240,15 @@ export async function sendApplicationAction(
         }
       }
 
-      for (const doc of userDocs) {
-        totalAttachmentSize += doc.file_size || 0
+      // Sort documents by their persistent sort_order from database
+      const orderedDocs = [...userDocs].sort((a, b) => {
+        const orderA = a.sort_order ?? 9999
+        const orderB = b.sort_order ?? 9999
+        if (orderA !== orderB) return orderA - orderB
+        return a.created_at < b.created_at ? -1 : 1
+      })
 
+      for (const doc of orderedDocs) {
         // Security check: storage_path must strictly belong to current user
         if (!doc.storage_path.startsWith(`${user.id}/`)) {
           return { success: false, error: `Akses dokumen tidak sah: ${doc.document_name}` }
@@ -271,38 +276,128 @@ export async function sendApplicationAction(
           buffer: Buffer.from(arrayBuffer),
         })
       }
+    }
 
-      // Check total attachment size against 25MB limit
-      if (totalAttachmentSize > MAX_TOTAL_ATTACHMENT_SIZE) {
+    // 10. Automatically Merge Multiple PDF Documents if > 1 PDF is selected
+    const pdfAttachments = verifiedAttachments.filter((att) =>
+      isPdfDocument(att.mime_type, att.original_filename)
+    )
+    const nonPdfAttachments = verifiedAttachments.filter(
+      (att) => !isPdfDocument(att.mime_type, att.original_filename)
+    )
+
+    const gmailAttachments: EmailAttachment[] = []
+    let mergedPdfFilename: string | undefined
+
+    if (pdfAttachments.length > 1) {
+      // Merge multiple PDFs into one unified document
+      mergedPdfFilename = generateMergedPdfFilename(companyName)
+      let mergedBuffer: Buffer
+      try {
+        mergedBuffer = await mergePdfBuffers(
+          pdfAttachments.map((att) => ({
+            name: att.document_name,
+            buffer: att.buffer,
+          }))
+        )
+      } catch (mergeErr: unknown) {
+        const errorMsg =
+          mergeErr instanceof Error ? mergeErr.message : 'Gagal menggabungkan berkas PDF.'
         return {
           success: false,
-          error: `Ukuran total lampiran (${(totalAttachmentSize / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimal 25 MB layanan email.`,
+          error: `Penggabungan PDF gagal: ${errorMsg}`,
         }
+      }
+
+      gmailAttachments.push({
+        filename: mergedPdfFilename,
+        content: mergedBuffer,
+        contentType: 'application/pdf',
+      })
+    } else if (pdfAttachments.length === 1) {
+      // Only 1 PDF: attach directly without merging
+      gmailAttachments.push({
+        filename: pdfAttachments[0].original_filename,
+        content: pdfAttachments[0].buffer,
+        contentType: pdfAttachments[0].mime_type || 'application/pdf',
+      })
+    }
+
+    // Attach any non-PDF documents separately as before
+    for (const nonPdf of nonPdfAttachments) {
+      gmailAttachments.push({
+        filename: nonPdf.original_filename,
+        content: nonPdf.buffer,
+        contentType: nonPdf.mime_type,
+      })
+    }
+
+    // Check total attachment size against 25MB limit
+    const totalAttachmentSize = gmailAttachments.reduce(
+      (acc, att) => acc + (Buffer.isBuffer(att.content) ? att.content.length : 0),
+      0
+    )
+
+    if (totalAttachmentSize > MAX_TOTAL_ATTACHMENT_SIZE) {
+      return {
+        success: false,
+        error: `Ukuran total lampiran (${(totalAttachmentSize / (1024 * 1024)).toFixed(1)} MB) melebihi batas maksimal 25 MB layanan email.`,
       }
     }
 
-    // 10. Snapshot documents data for persistent audit trail in email_logs
-    const documentsSnapshot = verifiedAttachments.map((doc) => ({
+    // 11. Snapshot documents data for persistent audit trail in email_logs
+    const documentsSnapshot = verifiedAttachments.map((doc, idx) => ({
       id: doc.id,
+      order: idx + 1,
       document_name: doc.document_name,
       original_filename: doc.original_filename,
       file_size: doc.file_size,
+      mime_type: doc.mime_type,
+      is_merged_pdf:
+        pdfAttachments.length > 1 && isPdfDocument(doc.mime_type, doc.original_filename),
+      merged_filename:
+        pdfAttachments.length > 1 && isPdfDocument(doc.mime_type, doc.original_filename)
+          ? mergedPdfFilename
+          : undefined,
     }))
 
-    // 11. Create initial queued entry in email_logs (Prevents double submission and tracks process)
-    const { data: logEntry, error: logInsertError } = await supabase
+    // 12. Create initial queued entry in email_logs (Prevents double submission and tracks process)
+    let { data: logEntry, error: logInsertError } = await supabase
       .from('email_logs')
       .insert({
         user_id: user.id,
         recipient_email: recipientEmail,
         company_name: companyName,
+        position: position,
         subject: resolvedSubject,
         message: resolvedMessage,
         selected_documents: documentsSnapshot,
         status: 'queued',
+        application_status: 'pending',
       })
       .select()
       .single()
+
+    // Graceful fallback: If application_status column is not yet present in PostgREST schema cache
+    if (logInsertError && logInsertError.message.includes('application_status')) {
+      const fallbackInsert = await supabase
+        .from('email_logs')
+        .insert({
+          user_id: user.id,
+          recipient_email: recipientEmail,
+          company_name: companyName,
+          position: position,
+          subject: resolvedSubject,
+          message: resolvedMessage,
+          selected_documents: documentsSnapshot,
+          status: 'queued',
+        })
+        .select()
+        .single()
+
+      logEntry = fallbackInsert.data
+      logInsertError = fallbackInsert.error
+    }
 
     if (logInsertError || !logEntry) {
       return {
@@ -311,13 +406,7 @@ export async function sendApplicationAction(
       }
     }
 
-    // 12. Build RFC 2822 / RFC 2045 compliant MIME message
-    const gmailAttachments: EmailAttachment[] = verifiedAttachments.map((att) => ({
-      filename: att.original_filename,
-      content: att.buffer,
-      contentType: att.mime_type,
-    }))
-
+    // 13. Build RFC 2822 / RFC 2045 compliant MIME message
     const rawMime = buildMimeMessage({
       from: senderEmail,
       senderName,

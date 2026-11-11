@@ -12,6 +12,7 @@ import {
   Clock,
   ExternalLink,
 } from 'lucide-react'
+import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { StatCard } from '@/components/common/stat-card'
 import { buttonVariants } from '@/components/ui/button'
@@ -49,6 +50,7 @@ function getPast14Days(): { date: string; label: string; dayName: string }[] {
 }
 
 export default async function DashboardPage() {
+  await connection()
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 

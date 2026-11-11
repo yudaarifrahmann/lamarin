@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -127,16 +128,18 @@ export function Header({ user, profile }: HeaderProps) {
           </DropdownMenuTrigger>
 
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel className="font-normal">
-              <div className="flex flex-col space-y-1">
-                <p className="text-xs font-semibold leading-none text-foreground truncate">
-                  {displayName}
-                </p>
-                <p className="text-[11px] leading-none text-muted-foreground truncate font-mono">
-                  {email}
-                </p>
-              </div>
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-xs font-semibold leading-none text-foreground truncate">
+                    {displayName}
+                  </p>
+                  <p className="text-[11px] leading-none text-muted-foreground truncate font-mono">
+                    {email}
+                  </p>
+                </div>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
 
             <DropdownMenuItem

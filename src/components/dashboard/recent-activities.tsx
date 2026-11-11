@@ -3,6 +3,7 @@ import Link from 'next/link'
 import {
   Send,
   Building2,
+  Briefcase,
   Mail,
   Paperclip,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   ShieldCheck,
   ArrowRight,
   Inbox,
+  XCircle,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +32,7 @@ function StatusBadge({ status }: { status: string }) {
       return (
         <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] gap-1 px-2 py-0.5">
           <CheckCircle2 className="h-3 w-3" />
-          <span>Terkirim</span>
+          <span>Pengiriman: Terkirim</span>
         </Badge>
       )
     case 'queued':
@@ -40,27 +42,57 @@ function StatusBadge({ status }: { status: string }) {
           className="bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] gap-1 px-2 py-0.5 border border-amber-500/30"
         >
           <Clock className="h-3 w-3" />
-          <span>Diproses</span>
+          <span>Pengiriman: Diproses</span>
         </Badge>
       )
     case 'delivered':
       return (
         <Badge className="bg-purple-600 hover:bg-purple-600 text-white text-[10px] gap-1 px-2 py-0.5">
           <ShieldCheck className="h-3 w-3" />
-          <span>Diterima</span>
+          <span>Pengiriman: Diterima</span>
         </Badge>
       )
     case 'failed':
       return (
         <Badge variant="destructive" className="text-[10px] gap-1 px-2 py-0.5">
           <AlertTriangle className="h-3 w-3" />
-          <span>Gagal</span>
+          <span>Pengiriman: Gagal</span>
         </Badge>
       )
     default:
       return (
         <Badge variant="outline" className="text-[10px] px-2 py-0.5">
-          {status}
+          Pengiriman: {status}
+        </Badge>
+      )
+  }
+}
+
+function OutcomeBadge({ status }: { status?: string }) {
+  switch (status) {
+    case 'accepted':
+      return (
+        <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-[10px] gap-1 px-2 py-0.5">
+          <CheckCircle2 className="h-3 w-3" />
+          <span>Lamaran: Diterima</span>
+        </Badge>
+      )
+    case 'rejected':
+      return (
+        <Badge variant="destructive" className="text-[10px] gap-1 px-2 py-0.5">
+          <XCircle className="h-3 w-3" />
+          <span>Lamaran: Ditolak</span>
+        </Badge>
+      )
+    case 'pending':
+    default:
+      return (
+        <Badge
+          variant="outline"
+          className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-[10px] gap-1 px-2 py-0.5"
+        >
+          <Clock className="h-3 w-3" />
+          <span>Lamaran: Pending</span>
         </Badge>
       )
   }
@@ -136,7 +168,14 @@ export function RecentActivities({ logs }: RecentActivitiesProps) {
                       <span className="font-semibold text-sm text-foreground truncate">
                         {log.company_name}
                       </span>
+                      {log.position && (
+                        <Badge variant="outline" className="text-[10px] gap-1 font-medium bg-muted/40 border-border/80 text-foreground/90 py-0 h-5">
+                          <Briefcase className="h-2.5 w-2.5 text-primary" />
+                          <span>{log.position}</span>
+                        </Badge>
+                      )}
                       <StatusBadge status={log.status} />
+                      <OutcomeBadge status={log.application_status} />
                     </div>
 
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono truncate">

@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { redirect } from 'next/navigation'
+import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
@@ -12,6 +13,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
+  await connection()
   const supabase = await createClient()
 
   const {
@@ -21,6 +23,11 @@ export default async function DashboardLayout({
   // Protect all dashboard routes: redirect unauthenticated users to /login
   if (!user) {
     redirect('/login')
+  }
+
+  // Ensure email has been confirmed via OTP
+  if (!user.email_confirmed_at) {
+    redirect(`/verify-otp?email=${encodeURIComponent(user.email || '')}`)
   }
 
   // Fetch user profile from public.profiles

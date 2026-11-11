@@ -118,11 +118,13 @@ export function TemplateModal({
   const previewSubject = replacePlaceholders(subject, {
     sender_name: senderName || 'Nama Pelamar',
     company_name: 'PT Inovasi Digital Indonesia',
+    position: 'Software Engineer',
   })
 
   const previewMessage = replacePlaceholders(message, {
     sender_name: senderName || 'Nama Pelamar',
     company_name: 'PT Inovasi Digital Indonesia',
+    position: 'Software Engineer',
   })
 
   return (

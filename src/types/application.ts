@@ -5,9 +5,11 @@ export type EmailLogInsert = Database['public']['Tables']['email_logs']['Insert'
 export type EmailLogUpdate = Database['public']['Tables']['email_logs']['Update']
 
 export type EmailLogStatus = EmailLogRow['status']
+export type ApplicationOutcomeStatus = 'pending' | 'accepted' | 'rejected'
 
 export interface EmailLogFilter {
   status?: EmailLogStatus
+  application_status?: ApplicationOutcomeStatus
   search?: string
   startDate?: string
   endDate?: string
@@ -19,4 +21,7 @@ export interface ApplicationStats {
   queued: number
   delivered: number
   failed: number
+  pendingOutcome?: number
+  acceptedOutcome?: number
+  rejectedOutcome?: number
 }

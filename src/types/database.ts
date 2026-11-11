@@ -105,6 +105,7 @@ export interface Database {
           storage_path: string
           mime_type: string
           file_size: number
+          sort_order: number | null
           created_at: string
           updated_at: string
         }
@@ -116,6 +117,7 @@ export interface Database {
           storage_path: string
           mime_type: string
           file_size: number
+          sort_order?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -127,6 +129,7 @@ export interface Database {
           storage_path?: string
           mime_type?: string
           file_size?: number
+          sort_order?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -138,11 +141,13 @@ export interface Database {
           user_id: string
           recipient_email: string
           company_name: string
+          position: string
           subject: string
           message: string
           selected_documents: Json
           resend_message_id: string | null
           status: 'queued' | 'sent' | 'failed' | 'delivered' | 'bounced'
+          application_status: 'pending' | 'accepted' | 'rejected'
           error_message: string | null
           sent_at: string | null
           created_at: string
@@ -152,11 +157,13 @@ export interface Database {
           user_id: string
           recipient_email: string
           company_name: string
+          position?: string
           subject: string
           message: string
           selected_documents?: Json
           resend_message_id?: string | null
           status?: 'queued' | 'sent' | 'failed' | 'delivered' | 'bounced'
+          application_status?: 'pending' | 'accepted' | 'rejected'
           error_message?: string | null
           sent_at?: string | null
           created_at?: string
@@ -166,11 +173,13 @@ export interface Database {
           user_id?: string
           recipient_email?: string
           company_name?: string
+          position?: string
           subject?: string
           message?: string
           selected_documents?: Json
           resend_message_id?: string | null
           status?: 'queued' | 'sent' | 'failed' | 'delivered' | 'bounced'
+          application_status?: 'pending' | 'accepted' | 'rejected'
           error_message?: string | null
           sent_at?: string | null
           created_at?: string

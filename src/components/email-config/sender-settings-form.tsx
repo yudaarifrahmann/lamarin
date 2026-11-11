@@ -88,11 +88,13 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
   const previewSubject = replacePlaceholders(defaultSubject, {
     sender_name: senderName || 'Nama Pelamar',
     company_name: 'PT Inovasi Digital Indonesia',
+    position: 'Software Engineer',
   })
 
   const previewMessage = replacePlaceholders(defaultMessage, {
     sender_name: senderName || 'Nama Pelamar',
     company_name: 'PT Inovasi Digital Indonesia',
+    position: 'Software Engineer',
   })
 
   return (

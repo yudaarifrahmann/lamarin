@@ -1,6 +1,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { Settings2, ArrowLeft, ShieldCheck, MailCheck, CheckCircle2, AlertCircle } from 'lucide-react'
+import { connection } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import type { EmailSettingsRow, EmailTemplateRow } from '@/types/config'
 import type { GmailConnectionStatus } from '@/types/gmail'
@@ -11,6 +12,7 @@ import { GmailConnectionCard } from '@/components/config/gmail-connection-card'
 export const instant = false
 
 export default async function KonfigurasiEmailPage() {
+  await connection()
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
