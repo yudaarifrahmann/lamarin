@@ -47,6 +47,29 @@ export function EmailConfigManager({
     setTimeout(() => setIsRefreshing(false), 500)
   }
 
+  // Instant optimistic state update to guarantee zero lag when templates are created/updated
+  const handleTemplateSaved = (savedTemplate?: EmailTemplateRow) => {
+    if (savedTemplate) {
+      setTemplates((prev) => {
+        const existingIdx = prev.findIndex((t) => t.id === savedTemplate.id)
+        let updated: EmailTemplateRow[]
+        if (existingIdx >= 0) {
+          updated = prev.map((t) => (t.id === savedTemplate.id ? savedTemplate : t))
+        } else {
+          updated = [savedTemplate, ...prev]
+        }
+
+        if (savedTemplate.is_default) {
+          updated = updated.map((t) =>
+            t.id === savedTemplate.id ? t : { ...t, is_default: false }
+          )
+        }
+        return updated
+      })
+    }
+    handleRefresh()
+  }
+
   const senderName = settings?.sender_name || ''
   const senderEmail = settings?.sender_email || ''
 
@@ -116,7 +139,7 @@ export function EmailConfigManager({
         template={visualEditorTemplate}
         senderName={senderName}
         senderEmail={senderEmail}
-        onSuccess={handleRefresh}
+        onSuccess={handleTemplateSaved}
       />
 
       {/* Create / Edit Standard Template Modal */}
@@ -130,7 +153,7 @@ export function EmailConfigManager({
         }}
         template={editingTemplate}
         senderName={senderName}
-        onSuccess={handleRefresh}
+        onSuccess={handleTemplateSaved}
       />
 
       {/* Standalone Template Preview Modal */}

@@ -22,7 +22,7 @@ import type { DocumentRow } from '@/types/document'
 import type { EmailSettingsRow, EmailTemplateRow } from '@/types/config'
 import { formatBytes } from '@/lib/format'
 import { SUPPORTED_PLACEHOLDERS, replacePlaceholders } from '@/lib/placeholders'
-import { isPdfDocument, generateMergedPdfFilename } from '@/lib/pdf/merger'
+import { isPdfDocument, isImageDocument, generateMergedPdfFilename } from '@/lib/pdf/merger'
 import { sendApplicationAction } from '@/app/actions/send-application'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -46,19 +46,31 @@ export function ApplicationForm({
   emailTemplates,
   connectedGmailEmail,
 }: ApplicationFormProps) {
-  // Find default template if any
-  const defaultTemplate = emailTemplates.find((t) => t.is_default)
+  // Find default template or fallback to the first available template
+  const defaultTemplate = emailTemplates.find((t) => t.is_default) || (emailTemplates.length > 0 ? emailTemplates[0] : undefined)
   const [selectedTemplateId, setSelectedTemplateId] = React.useState<string | undefined>(
     defaultTemplate?.id
   )
 
-  // Form states
+  // Form states - prefill subject & message from active template on mount
   const [recipientEmail, setRecipientEmail] = React.useState('')
   const [companyName, setCompanyName] = React.useState('')
   const [position, setPosition] = React.useState('')
-  const [subject, setSubject] = React.useState('')
-  const [message, setMessage] = React.useState('')
+  const [subject, setSubject] = React.useState(defaultTemplate?.subject || '')
+  const [message, setMessage] = React.useState(defaultTemplate?.message || '')
   const [selectedDocIds, setSelectedDocIds] = React.useState<string[]>([])
+
+  // Keep template synchronized if emailTemplates loads/updates
+  React.useEffect(() => {
+    if (emailTemplates.length > 0 && !selectedTemplateId) {
+      const def = emailTemplates.find((t) => t.is_default) || emailTemplates[0]
+      if (def) {
+        setSelectedTemplateId(def.id)
+        setSubject((prev) => prev || def.subject)
+        setMessage((prev) => prev || def.message)
+      }
+    }
+  }, [emailTemplates, selectedTemplateId])
 
   // Modal & sending states
   const [isConfirmOpen, setIsConfirmOpen] = React.useState(false)
@@ -85,6 +97,8 @@ export function ApplicationForm({
     emailSettings?.sender_name || 'Pelamar Kerja'
 
   const senderEmail = connectedGmailEmail || emailSettings?.sender_email || ''
+
+  const senderCity = (emailSettings as any)?.sender_city as string | undefined
 
   // Load a chosen template into the subject & message inputs
   const handleSelectTemplate = (tplId: string) => {
@@ -153,16 +167,20 @@ export function ApplicationForm({
   )
   const isAttachmentSizeExceeded = totalAttachmentBytes > 25 * 1024 * 1024
 
-  // PDF Merge computations
-  const pdfDocs = selectedDocuments.filter((d) =>
-    isPdfDocument(d.mime_type, d.original_filename)
+  // PDF / Image Merge computations — all processable docs go into one merged PDF
+  const processableDocs = selectedDocuments.filter(
+    (d) =>
+      isPdfDocument(d.mime_type, d.original_filename) ||
+      isImageDocument(d.mime_type, d.original_filename)
   )
-  const nonPdfDocs = selectedDocuments.filter(
-    (d) => !isPdfDocument(d.mime_type, d.original_filename)
+  const unprocessableDocs = selectedDocuments.filter(
+    (d) =>
+      !isPdfDocument(d.mime_type, d.original_filename) &&
+      !isImageDocument(d.mime_type, d.original_filename)
   )
-  const isMergedPdf = pdfDocs.length > 1
-  const mergedPdfName = isMergedPdf ? generateMergedPdfFilename(companyName) : null
-  const mergedPdfSize = pdfDocs.reduce((acc, d) => acc + (d.file_size || 0), 0)
+  const isMergedPdf = processableDocs.length > 1
+  const mergedPdfName = processableDocs.length > 0 ? generateMergedPdfFilename(companyName) : null
+  const mergedPdfSize = processableDocs.reduce((acc, d) => acc + (d.file_size || 0), 0)
 
   // Live preview values
   const activeSubject = subject.trim() || defaultSubjectFallback
@@ -172,12 +190,14 @@ export function ApplicationForm({
     company_name: companyName || 'PT Target Perusahaan',
     position: position || 'Software Engineer',
     sender_name: senderName,
+    sender_city: senderCity || '',
   })
 
   const previewMessage = replacePlaceholders(activeMessage, {
     company_name: companyName || 'PT Target Perusahaan',
     position: position || 'Software Engineer',
     sender_name: senderName,
+    sender_city: senderCity || '',
   })
 
   // Open confirmation
@@ -243,12 +263,14 @@ export function ApplicationForm({
         resendId: result.data.resendId,
       })
 
-      // Reset form
+      // Reset form for next application — restore template content so it's ready immediately
       setRecipientEmail('')
       setCompanyName('')
       setPosition('')
-      setSubject('')
-      setMessage('')
+      // Restore subject & message from the currently selected template (don't blank the form)
+      const activeTpl = emailTemplates.find((t) => t.id === selectedTemplateId)
+      setSubject(activeTpl?.subject || defaultSubjectFallback)
+      setMessage(activeTpl?.message || defaultMessageFallback)
       setSelectedDocIds([])
     } else {
       toast.error(result.error || 'Gagal mengirim email lamaran.')
@@ -615,7 +637,7 @@ export function ApplicationForm({
                     <div className="p-2.5 rounded-lg border border-primary/20 bg-primary/5 text-xs text-primary flex items-center gap-2">
                       <FileCheck className="h-4 w-4 shrink-0" />
                       <span>
-                        <strong>{pdfDocs.length} dokumen PDF</strong> akan otomatis digabung menjadi 1 lampiran PDF: <code className="font-mono text-[11px] font-semibold">{mergedPdfName}</code> sesuai urutan di Manajemen Dokumen.
+                        <strong>{processableDocs.length} dokumen</strong> (PDF dan/atau gambar) akan otomatis dikonversi dan digabung menjadi 1 lampiran PDF: <code className="font-mono text-[11px] font-semibold">{mergedPdfName}</code> sesuai urutan di Manajemen Dokumen.
                       </span>
                     </div>
                   )}
@@ -721,7 +743,7 @@ export function ApplicationForm({
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-foreground flex items-center gap-1.5">
                       <Paperclip className="h-3.5 w-3.5 text-primary" />
-                      <span>Lampiran Email ({isMergedPdf ? 1 + nonPdfDocs.length : selectedDocuments.length})</span>
+                      <span>Lampiran Email ({isMergedPdf ? 1 + unprocessableDocs.length : selectedDocuments.length})</span>
                     </span>
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {formatBytes(totalAttachmentBytes)}
@@ -734,7 +756,7 @@ export function ApplicationForm({
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {/* Merged PDF Card Preview */}
+                      {/* Merged PDF Card Preview — when >1 processable docs (PDF or image) */}
                       {isMergedPdf && (
                         <div className="p-2.5 rounded-lg bg-background border border-primary/30 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-2">
@@ -750,11 +772,14 @@ export function ApplicationForm({
                           </div>
                           <div className="text-[10px] text-muted-foreground pl-5 space-y-1 border-t border-border/40 pt-1.5">
                             <span className="font-medium block text-foreground/80">Urutan Halaman PDF Gabungan:</span>
-                            {pdfDocs.map((doc, idx) => (
+                            {processableDocs.map((doc, idx) => (
                               <div key={doc.id} className="flex items-center justify-between gap-1.5 truncate">
                                 <div className="flex items-center gap-1.5 truncate">
                                   <span className="text-primary font-mono font-bold">#{doc.sort_order ?? idx + 1}</span>
                                   <span className="truncate">{doc.document_name}</span>
+                                  {isImageDocument(doc.mime_type, doc.original_filename) && (
+                                    <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">Gambar→PDF</Badge>
+                                  )}
                                 </div>
                                 <span className="font-mono text-muted-foreground shrink-0">({formatBytes(doc.file_size)})</span>
                               </div>
@@ -763,9 +788,9 @@ export function ApplicationForm({
                         </div>
                       )}
 
-                      {/* Single PDF if not merged */}
+                      {/* Single processable doc if not merged */}
                       {!isMergedPdf &&
-                        pdfDocs.map((doc, idx) => (
+                        processableDocs.map((doc, idx) => (
                           <div
                             key={doc.id}
                             className="flex items-center justify-between p-2 rounded-md bg-background border border-border/80 text-xs font-medium text-foreground shadow-2xs"
@@ -774,6 +799,9 @@ export function ApplicationForm({
                               <span className="text-primary font-mono font-bold text-[11px]">#{doc.sort_order ?? idx + 1}</span>
                               <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
                               <span className="truncate">{doc.document_name}</span>
+                              {isImageDocument(doc.mime_type, doc.original_filename) && (
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">Gambar→PDF</Badge>
+                              )}
                             </div>
                             <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                               {formatBytes(doc.file_size)}
@@ -781,8 +809,8 @@ export function ApplicationForm({
                           </div>
                         ))}
 
-                      {/* Non-PDF documents */}
-                      {nonPdfDocs.map((doc, idx) => (
+                      {/* Truly unsupported format documents (attached as-is) */}
+                      {unprocessableDocs.map((doc, idx) => (
                         <div
                           key={doc.id}
                           className="flex items-center justify-between p-2 rounded-md bg-background border border-border/80 text-xs font-medium text-foreground shadow-2xs"
@@ -793,7 +821,7 @@ export function ApplicationForm({
                             </span>
                             <Paperclip className="h-3.5 w-3.5 text-primary shrink-0" />
                             <span className="truncate">{doc.document_name}</span>
-                            <Badge variant="outline" className="text-[9px] px-1 py-0">Non-PDF</Badge>
+                            <Badge variant="outline" className="text-[9px] px-1 py-0">Lampiran Terpisah</Badge>
                           </div>
                           <span className="text-[10px] text-muted-foreground font-mono shrink-0">
                             {formatBytes(doc.file_size)}

@@ -25,7 +25,7 @@ interface TemplateModalProps {
   onOpenChange: (open: boolean) => void
   template: EmailTemplateRow | null
   senderName: string
-  onSuccess: () => void
+  onSuccess: (savedTemplate?: EmailTemplateRow) => void
 }
 
 export function TemplateModal({
@@ -108,7 +108,7 @@ export function TemplateModal({
           ? 'Template email berhasil diperbarui.'
           : 'Template email baru berhasil disimpan ke Supabase.'
       )
-      onSuccess()
+      onSuccess(result.data as EmailTemplateRow | undefined)
       onOpenChange(false)
     } else {
       toast.error(result.error || 'Gagal menyimpan template email.')

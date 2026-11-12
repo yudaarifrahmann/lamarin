@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { EmailConfigManager } from '@/components/email-config/email-config-manager'
 import { GmailConnectionCard } from '@/components/config/gmail-connection-card'
 
-export const instant = false
+export const dynamic = 'force-dynamic'
 
 export default async function KonfigurasiEmailPage() {
   await connection()
@@ -21,15 +21,32 @@ export default async function KonfigurasiEmailPage() {
   let gmailStatus: GmailConnectionStatus = { isConnected: false }
 
   if (user) {
-    // 1. Fetch user email_settings
+    // 1. Fetch user email_settings (merge with persistent user_metadata for robust dual-persistence)
     const { data: settingsData } = await supabase
       .from('email_settings')
       .select('*')
       .eq('user_id', user.id)
       .maybeSingle()
 
+    const metaCity = (user.user_metadata?.sender_city as string) || null
+
     if (settingsData) {
-      settings = settingsData as EmailSettingsRow
+      settings = {
+        ...(settingsData as EmailSettingsRow),
+        sender_city: (settingsData as any)?.sender_city || metaCity || null,
+      }
+    } else if (metaCity) {
+      settings = {
+        id: '',
+        user_id: user.id,
+        sender_name: user.user_metadata?.full_name || '',
+        sender_email: user.email || '',
+        sender_city: metaCity,
+        default_subject: null,
+        default_message: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
     }
 
     // 2. Fetch user email_templates

@@ -11,7 +11,9 @@ const ALLOWED_MIME_TYPES = [
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
+  'image/jpg',
   'image/png',
+  'image/webp',
 ]
 
 export interface ActionResponse<T = unknown> {
@@ -22,6 +24,14 @@ export interface ActionResponse<T = unknown> {
 
 /**
  * Server Action: Upload document to private storage bucket and create DB record
+ * 
+ * @deprecated Prefer the two-step direct upload flow:
+ *   1. Client uploads directly to Supabase Storage via browser (see document-upload-modal.tsx)
+ *   2. Client calls saveDocumentMetadataAction() to persist the DB record
+ * 
+ * This action is kept for compatibility but should NOT be used for new uploads because
+ * routing the file binary through Next.js Server Action adds latency and can silently
+ * hang under serverless platform time limits.
  */
 export async function uploadDocumentAction(formData: FormData): Promise<ActionResponse<DocumentRow>> {
   try {
@@ -147,6 +157,132 @@ export async function uploadDocumentAction(formData: FormData): Promise<ActionRe
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Terjadi kesalahan sistem saat mengunggah dokumen.',
+    }
+  }
+}
+
+/**
+ * Server Action: Save document metadata to DB after a client-side direct upload to Supabase Storage.
+ *
+ * This is part of the two-step direct-upload flow:
+ *   Step 1 (browser): Upload file bytes directly from browser → Supabase Storage (bypasses Next.js)
+ *   Step 2 (server):  Call this action to persist the DB record (tiny payload — no file bytes)
+ *
+ * Advantages over uploadDocumentAction:
+ *   - No file bytes travel through Next.js → no bodySizeLimit constraint
+ *   - Browser can track real upload progress via XMLHttpRequest
+ *   - No server-side timeout risk from large file transfer
+ *   - Rollback: if DB insert fails, we delete the orphaned file from Storage
+ */
+export async function saveDocumentMetadataAction(payload: {
+  storagePath: string
+  documentName: string
+  originalFilename: string
+  mimeType: string
+  fileSize: number
+}): Promise<ActionResponse<DocumentRow>> {
+  try {
+    const supabase = await createClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return { success: false, error: 'Sesi login telah berakhir. Silakan login kembali.' }
+    }
+
+    const { storagePath, documentName, originalFilename, mimeType, fileSize } = payload
+
+    // Security: storage path must start with the authenticated user's ID
+    if (!storagePath.startsWith(`${user.id}/`)) {
+      return { success: false, error: 'Path dokumen tidak valid atau akses tidak sah.' }
+    }
+
+    // Validate mimeType server-side (defence-in-depth: browser already checked)
+    if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+      // Orphan cleanup
+      await supabase.storage.from(STORAGE_BUCKET).remove([storagePath])
+      return { success: false, error: `Tipe file '${mimeType}' tidak didukung.` }
+    }
+
+    if (fileSize > MAX_FILE_SIZE) {
+      await supabase.storage.from(STORAGE_BUCKET).remove([storagePath])
+      return { success: false, error: `Ukuran file (${(fileSize / (1024 * 1024)).toFixed(2)}MB) melebihi batas 10MB.` }
+    }
+
+    // Validate document name
+    const trimmedName = documentName?.trim()
+    if (!trimmedName) {
+      await supabase.storage.from(STORAGE_BUCKET).remove([storagePath])
+      return { success: false, error: 'Nama dokumen tidak boleh kosong.' }
+    }
+
+    // Determine next sort_order for this user (max + 1)
+    let nextSortOrder: number | null = null
+    try {
+      const { data: maxOrderData, error: maxOrderError } = await supabase
+        .from('documents')
+        .select('sort_order')
+        .eq('user_id', user.id)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!maxOrderError && maxOrderData) {
+        nextSortOrder = maxOrderData.sort_order != null ? maxOrderData.sort_order + 1 : 1
+      } else if (!maxOrderError) {
+        nextSortOrder = 1
+      }
+    } catch {
+      nextSortOrder = null
+    }
+
+    const baseInsertPayload = {
+      user_id: user.id,
+      document_name: trimmedName,
+      original_filename: originalFilename,
+      storage_path: storagePath,
+      mime_type: mimeType,
+      file_size: fileSize,
+    }
+
+    let dbData: DocumentRow | null = null
+    let dbError: { message: string } | null = null
+
+    if (nextSortOrder !== null) {
+      const resultWithOrder = await supabase
+        .from('documents')
+        .insert({ ...baseInsertPayload, sort_order: nextSortOrder })
+        .select()
+        .single()
+
+      dbData = resultWithOrder.data
+      dbError = resultWithOrder.error
+    }
+
+    // Fallback: sort_order column not yet in schema cache
+    if (!dbData && (nextSortOrder === null || (dbError && dbError.message.includes('sort_order')))) {
+      const fallbackResult = await supabase
+        .from('documents')
+        .insert(baseInsertPayload)
+        .select()
+        .single()
+
+      dbData = fallbackResult.data
+      dbError = fallbackResult.error
+    }
+
+    if (dbError || !dbData) {
+      // Rollback: delete the already-uploaded file so it doesn't become an orphan
+      await supabase.storage.from(STORAGE_BUCKET).remove([storagePath])
+      return { success: false, error: `Gagal menyimpan metadata dokumen: ${dbError?.message}` }
+    }
+
+    revalidatePath('/manajemen-dokumen')
+    revalidatePath('/kirim-lamaran')
+    return { success: true, data: dbData }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Terjadi kesalahan saat menyimpan metadata dokumen.',
     }
   }
 }

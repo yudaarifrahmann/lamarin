@@ -32,6 +32,7 @@ export async function saveEmailSettingsAction(payload: {
 
     const senderName = payload.sender_name?.trim()
     const senderEmail = payload.sender_email?.trim()
+    const senderCity = payload.sender_city?.trim() || ''
 
     if (!senderName) {
       return { success: false, error: 'Nama pengirim wajib diisi.' }
@@ -41,11 +42,23 @@ export async function saveEmailSettingsAction(payload: {
       return { success: false, error: 'Format email pengirim tidak valid.' }
     }
 
+    // 1. Dual-persistence: Always persist sender_city to user_metadata in Supabase Auth
+    // This ensures sender_city is permanently preserved even if the DB column hasn't migrated yet
+    try {
+      await supabase.auth.updateUser({
+        data: {
+          sender_city: senderCity || null,
+        },
+      })
+    } catch (authMetaErr) {
+      console.warn('Gagal memperbarui user_metadata auth:', authMetaErr)
+    }
+
     const upsertPayload: Record<string, unknown> = {
       user_id: user.id,
       sender_name: senderName,
       sender_email: senderEmail,
-      sender_city: payload.sender_city?.trim() || null,
+      sender_city: senderCity || null,
       default_subject: payload.default_subject?.trim() || null,
       default_message: payload.default_message || null,
     }
@@ -81,8 +94,15 @@ export async function saveEmailSettingsAction(payload: {
       return { success: false, error: `Gagal menyimpan konfigurasi email: ${error?.message || 'Data kosong'}` }
     }
 
+    const confirmedData: EmailSettingsRow = {
+      ...data,
+      sender_city: senderCity || (data as any)?.sender_city || null,
+    }
+
     revalidatePath('/konfigurasi-email')
-    return { success: true, data }
+    revalidatePath('/kirim-lamaran')
+    revalidatePath('/')
+    return { success: true, data: confirmedData }
   } catch (err) {
     return {
       success: false,
@@ -167,6 +187,8 @@ export async function createTemplateAction(payload: {
     }
 
     revalidatePath('/konfigurasi-email')
+    revalidatePath('/kirim-lamaran')
+    revalidatePath('/')
     return { success: true, data: data as unknown as EmailTemplateRow }
   } catch (err) {
     return {
@@ -219,15 +241,22 @@ export async function updateTemplateAction(
         .eq('user_id', user.id)
     }
 
+    // Prepare update data - NEVER overwrite existing layout_config with null
+    // unless payload explicitly passed layout_config (e.g. null or an updated config object)
+    const updateData: Record<string, unknown> = {
+      template_name: templateName,
+      subject,
+      message: payload.message,
+      is_default: payload.is_default,
+    }
+
+    if (payload.layout_config !== undefined) {
+      updateData.layout_config = payload.layout_config
+    }
+
     let { data, error } = await supabase
       .from('email_templates')
-      .update({
-        template_name: templateName,
-        subject,
-        message: payload.message,
-        is_default: payload.is_default,
-        layout_config: (payload.layout_config as any) || null,
-      })
+      .update(updateData as any)
       .eq('id', id)
       .eq('user_id', user.id)
       .select()
@@ -257,6 +286,8 @@ export async function updateTemplateAction(
     }
 
     revalidatePath('/konfigurasi-email')
+    revalidatePath('/kirim-lamaran')
+    revalidatePath('/')
     return { success: true, data: data as unknown as EmailTemplateRow }
   } catch (err) {
     return {
@@ -296,6 +327,8 @@ export async function setDefaultTemplateAction(id: string): Promise<ActionRespon
     }
 
     revalidatePath('/konfigurasi-email')
+    revalidatePath('/kirim-lamaran')
+    revalidatePath('/')
     return { success: true }
   } catch (err) {
     return {
@@ -328,6 +361,8 @@ export async function deleteTemplateAction(id: string): Promise<ActionResponse<{
     }
 
     revalidatePath('/konfigurasi-email')
+    revalidatePath('/kirim-lamaran')
+    revalidatePath('/')
     return { success: true, data: { id } }
   } catch (err) {
     return {

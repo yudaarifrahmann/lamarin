@@ -10,7 +10,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { ApplicationForm } from '@/components/applications/application-form'
 import { cn } from '@/lib/utils'
 
-export const instant = false
+export const dynamic = 'force-dynamic'
 
 export default async function KirimLamaranPage() {
   await connection()
@@ -44,15 +44,32 @@ export default async function KirimLamaranPage() {
       userDocuments = docsData as DocumentRow[]
     }
 
-    // 2. Fetch email_settings
+    // 2. Fetch email_settings (merge with persistent user_metadata for robust dual-persistence)
     const { data: settingsData } = await supabase
       .from('email_settings')
       .select('*')
       .eq('user_id', user.id)
       .maybeSingle()
 
+    const metaCity = (user.user_metadata?.sender_city as string) || null
+
     if (settingsData) {
-      emailSettings = settingsData as EmailSettingsRow
+      emailSettings = {
+        ...(settingsData as EmailSettingsRow),
+        sender_city: (settingsData as any)?.sender_city || metaCity || null,
+      }
+    } else if (metaCity) {
+      emailSettings = {
+        id: '',
+        user_id: user.id,
+        sender_name: user.user_metadata?.full_name || '',
+        sender_email: user.email || '',
+        sender_city: metaCity,
+        default_subject: null,
+        default_message: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
     }
 
     // 3. Fetch email_templates

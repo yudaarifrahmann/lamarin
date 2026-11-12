@@ -63,7 +63,7 @@ interface VisualLayoutEditorModalProps {
   senderName?: string
   senderEmail?: string
   senderPhone?: string
-  onSuccess: () => void
+  onSuccess: (savedTemplate?: EmailTemplateRow) => void
 }
 
 const FONT_OPTIONS: { label: string; value: FontFamily }[] = [
@@ -205,34 +205,50 @@ export function VisualLayoutEditorModal({
   const [isAnalyzingImage, setIsAnalyzingImage] = React.useState(false)
   const visionFileInputRef = React.useRef<HTMLInputElement>(null)
 
-  // Initialize or reset state when modal opens
+  // Track modal open state and template ID to prevent accidental re-renders/wipes while editing
+  const wasOpenRef = React.useRef(false)
+  const lastTemplateIdRef = React.useRef<string | null | undefined>(undefined)
+
+  // Initialize or reset state ONLY when modal transitions from closed -> open, or template ID changes
   React.useEffect(() => {
-    if (!open) return
+    const isOpening = open && !wasOpenRef.current
+    const templateChanged = open && template?.id !== lastTemplateIdRef.current
 
-    if (template) {
-      setTemplateName(template.template_name || '')
-      setSubject(template.subject || '')
-      setIsDefault(template.is_default || false)
+    wasOpenRef.current = open
 
-      if (template.layout_config && template.layout_config.blocks) {
-        setLayoutConfig(template.layout_config)
-      } else if (template.message) {
-        // Automatically parse legacy plain-text template into structured blocks
-        setLayoutConfig(parseTextToLayoutConfig(template.message, senderName))
-      } else {
-        setLayoutConfig(createDefaultLayoutConfig(senderName))
-      }
-    } else {
-      setTemplateName('')
-      setSubject('Lamaran Pekerjaan: {{position}} - {{company_name}}')
-      setIsDefault(false)
-      setLayoutConfig(createDefaultLayoutConfig(senderName))
+    if (!open) {
+      lastTemplateIdRef.current = undefined
+      return
     }
 
-    setVisionImage(null)
-    setVisionImagePreview(null)
-    setIsAnalyzingImage(false)
-  }, [open, template, senderName])
+    if (isOpening || templateChanged) {
+      lastTemplateIdRef.current = template?.id || null
+
+      if (template) {
+        setTemplateName(template.template_name || '')
+        setSubject(template.subject || '')
+        setIsDefault(template.is_default || false)
+
+        if (template.layout_config && template.layout_config.blocks && template.layout_config.blocks.length > 0) {
+          setLayoutConfig(template.layout_config)
+        } else if (template.message) {
+          // Automatically parse legacy plain-text template into structured blocks
+          setLayoutConfig(parseTextToLayoutConfig(template.message, senderName))
+        } else {
+          setLayoutConfig(createDefaultLayoutConfig(senderName))
+        }
+      } else {
+        setTemplateName('')
+        setSubject('Lamaran Pekerjaan: {{position}} - {{company_name}}')
+        setIsDefault(false)
+        setLayoutConfig(createDefaultLayoutConfig(senderName))
+      }
+
+      setVisionImage(null)
+      setVisionImagePreview(null)
+      setIsAnalyzingImage(false)
+    }
+  }, [open, template?.id])
 
   // Set default selected block when blocks change
   React.useEffect(() => {
@@ -449,7 +465,7 @@ export function VisualLayoutEditorModal({
           ? 'Template surat lamaran dan tata letak visual berhasil diperbarui.'
           : 'Template surat baru berhasil disimpan.'
       )
-      onSuccess()
+      onSuccess(result.data as EmailTemplateRow | undefined)
       onOpenChange(false)
     } else {
       toast.error(result.error || 'Gagal menyimpan template email.')

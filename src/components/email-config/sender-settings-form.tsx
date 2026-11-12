@@ -30,7 +30,11 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
     if (initialSettings) {
       setSenderName(initialSettings.sender_name || '')
       setSenderEmail(initialSettings.sender_email || '')
-      setSenderCity((initialSettings as any)?.sender_city || '')
+      const incomingCity = (initialSettings as any)?.sender_city
+      // Only update senderCity if incoming value is non-empty, preventing accidental wipes on stale revalidation
+      if (incomingCity !== undefined && incomingCity !== null && incomingCity !== '') {
+        setSenderCity(incomingCity)
+      }
       setDefaultSubject(initialSettings.default_subject || '')
       setDefaultMessage(initialSettings.default_message || '')
     }
@@ -81,6 +85,9 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
     setIsSaving(false)
 
     if (result.success) {
+      if (result.data && (result.data as any).sender_city) {
+        setSenderCity((result.data as any).sender_city)
+      }
       toast.success('Pengaturan email dan template default berhasil disimpan ke Supabase.')
     } else {
       toast.error(result.error || 'Gagal menyimpan pengaturan.')

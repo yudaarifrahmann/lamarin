@@ -6,7 +6,12 @@ import { createGmailClientFromRefreshToken } from '@/lib/gmail/client'
 import { buildMimeMessage, type EmailAttachment } from '@/lib/gmail/mime'
 import { decryptToken } from '@/lib/encryption'
 import { replacePlaceholders } from '@/lib/placeholders'
-import { isPdfDocument, generateMergedPdfFilename, mergePdfBuffers } from '@/lib/pdf/merger'
+import {
+  isPdfDocument,
+  isImageDocument,
+  generateMergedPdfFilename,
+  mergePdfBuffers,
+} from '@/lib/pdf/merger'
 import { renderLayoutToHtml, getFormattedTodayDate } from '@/lib/templates/layout-engine'
 import type { TemplateLayoutConfig } from '@/types/template-layout'
 import type { ActionResponse } from '@/app/actions/documents'
@@ -197,8 +202,11 @@ export async function sendApplicationAction(
     // Authorized Gmail address from user's verified gmail_connections record
     const senderEmail = gmailConn.gmail_email
 
-    // Sender city from email_settings (may be null if not configured)
-    const senderCity = (emailSettings as any)?.sender_city as string | null | undefined
+    // Sender city from email_settings or user_metadata (dual-persistence fallback)
+    const senderCity =
+      ((emailSettings as any)?.sender_city as string | null | undefined) ||
+      (user.user_metadata?.sender_city as string | undefined) ||
+      ''
 
     // 7. Resolve Subject (Manual -> Chosen/Default Template -> Email Settings -> Fallback)
     const rawSubject =
@@ -301,58 +309,87 @@ export async function sendApplicationAction(
       }
     }
 
-    // 10. Automatically Merge Multiple PDF Documents if > 1 PDF is selected
-    const pdfAttachments = verifiedAttachments.filter((att) =>
-      isPdfDocument(att.mime_type, att.original_filename)
-    )
-    const nonPdfAttachments = verifiedAttachments.filter(
-      (att) => !isPdfDocument(att.mime_type, att.original_filename)
-    )
+    // 10. Merge ALL selected documents into a single PDF
+    // - PDF documents: pages copied directly
+    // - Image documents (JPG/JPEG/PNG/WebP): converted to A4 PDF page first
+    // - Ordering strictly follows sort_order from database (already applied above in orderedDocs)
 
     const gmailAttachments: EmailAttachment[] = []
     let mergedPdfFilename: string | undefined
 
-    if (pdfAttachments.length > 1) {
-      // Merge multiple PDFs into one unified document
-      mergedPdfFilename = generateMergedPdfFilename(companyName)
-      let mergedBuffer: Buffer
-      try {
-        mergedBuffer = await mergePdfBuffers(
-          pdfAttachments.map((att) => ({
-            name: att.document_name,
-            buffer: att.buffer,
-          }))
-        )
-      } catch (mergeErr: unknown) {
-        const errorMsg =
-          mergeErr instanceof Error ? mergeErr.message : 'Gagal menggabungkan berkas PDF.'
-        return {
-          success: false,
-          error: `Penggabungan PDF gagal: ${errorMsg}`,
+    if (verifiedAttachments.length > 0) {
+      // Classify: documents we can process (PDF or supported images) vs truly unsupported
+      const processableAttachments = verifiedAttachments.filter(
+        (att) =>
+          isPdfDocument(att.mime_type, att.original_filename) ||
+          isImageDocument(att.mime_type, att.original_filename)
+      )
+      const unsupportedAttachments = verifiedAttachments.filter(
+        (att) =>
+          !isPdfDocument(att.mime_type, att.original_filename) &&
+          !isImageDocument(att.mime_type, att.original_filename)
+      )
+
+      if (processableAttachments.length > 0) {
+        if (processableAttachments.length === 1) {
+          const single = processableAttachments[0]
+          if (isPdfDocument(single.mime_type, single.original_filename)) {
+            // Single PDF → attach as-is, no merging needed
+            gmailAttachments.push({
+              filename: single.original_filename,
+              content: single.buffer,
+              contentType: 'application/pdf',
+            })
+          } else {
+            // Single image → convert to PDF, then attach
+            mergedPdfFilename = generateMergedPdfFilename(companyName)
+            let convertedBuffer: Buffer
+            try {
+              convertedBuffer = await mergePdfBuffers([
+                { name: single.document_name, buffer: single.buffer, mimeType: single.mime_type },
+              ])
+            } catch (convErr: unknown) {
+              const errorMsg = convErr instanceof Error ? convErr.message : 'Gagal mengonversi gambar ke PDF.'
+              return { success: false, error: `Konversi gambar gagal: ${errorMsg}` }
+            }
+            gmailAttachments.push({
+              filename: mergedPdfFilename,
+              content: convertedBuffer,
+              contentType: 'application/pdf',
+            })
+          }
+        } else {
+          // Multiple documents → merge ALL into one PDF (images are auto-converted inside mergePdfBuffers)
+          mergedPdfFilename = generateMergedPdfFilename(companyName)
+          let mergedBuffer: Buffer
+          try {
+            mergedBuffer = await mergePdfBuffers(
+              processableAttachments.map((att) => ({
+                name: att.document_name,
+                buffer: att.buffer,
+                mimeType: att.mime_type,
+              }))
+            )
+          } catch (mergeErr: unknown) {
+            const errorMsg = mergeErr instanceof Error ? mergeErr.message : 'Gagal menggabungkan dokumen.'
+            return { success: false, error: `Penggabungan dokumen gagal: ${errorMsg}` }
+          }
+          gmailAttachments.push({
+            filename: mergedPdfFilename,
+            content: mergedBuffer,
+            contentType: 'application/pdf',
+          })
         }
       }
 
-      gmailAttachments.push({
-        filename: mergedPdfFilename,
-        content: mergedBuffer,
-        contentType: 'application/pdf',
-      })
-    } else if (pdfAttachments.length === 1) {
-      // Only 1 PDF: attach directly without merging
-      gmailAttachments.push({
-        filename: pdfAttachments[0].original_filename,
-        content: pdfAttachments[0].buffer,
-        contentType: pdfAttachments[0].mime_type || 'application/pdf',
-      })
-    }
-
-    // Attach any non-PDF documents separately as before
-    for (const nonPdf of nonPdfAttachments) {
-      gmailAttachments.push({
-        filename: nonPdf.original_filename,
-        content: nonPdf.buffer,
-        contentType: nonPdf.mime_type,
-      })
+      // Attach any truly unsupported format documents separately (e.g. .doc, .xlsx)
+      for (const unsupported of unsupportedAttachments) {
+        gmailAttachments.push({
+          filename: unsupported.original_filename,
+          content: unsupported.buffer,
+          contentType: unsupported.mime_type,
+        })
+      }
     }
 
     // Check total attachment size against 25MB limit
@@ -376,12 +413,8 @@ export async function sendApplicationAction(
       original_filename: doc.original_filename,
       file_size: doc.file_size,
       mime_type: doc.mime_type,
-      is_merged_pdf:
-        pdfAttachments.length > 1 && isPdfDocument(doc.mime_type, doc.original_filename),
-      merged_filename:
-        pdfAttachments.length > 1 && isPdfDocument(doc.mime_type, doc.original_filename)
-          ? mergedPdfFilename
-          : undefined,
+      is_merged_pdf: Boolean(mergedPdfFilename),
+      merged_filename: mergedPdfFilename || undefined,
     }))
 
     // 12. Create initial queued entry in email_logs (Prevents double submission and tracks process)
