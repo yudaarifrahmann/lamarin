@@ -10,6 +10,7 @@ import { replacePlaceholders } from '@/lib/placeholders'
 
 /**
  * Format today's date in formal Indonesian (e.g. 11 November 2026)
+ * Always uses Asia/Jakarta timezone to match the user's local date.
  */
 export function getFormattedTodayDate(): string {
   const months = [
@@ -26,11 +27,18 @@ export function getFormattedTodayDate(): string {
     'November',
     'Desember',
   ]
-  const today = new Date()
-  const day = today.getDate()
-  const month = months[today.getMonth()]
-  const year = today.getFullYear()
-  return `${day} ${month} ${year}`
+  // Use Intl.DateTimeFormat to get the correct date in Asia/Jakarta timezone
+  const formatter = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = formatter.formatToParts(new Date())
+  const day = parseInt(parts.find((p) => p.type === 'day')!.value, 10)
+  const month = parseInt(parts.find((p) => p.type === 'month')!.value, 10)
+  const year = parseInt(parts.find((p) => p.type === 'year')!.value, 10)
+  return `${day} ${months[month - 1]} ${year}`
 }
 
 /**
@@ -42,6 +50,7 @@ export function applyAllPlaceholders(
     sender_email?: string
     sender_phone?: string
     today_date?: string
+    sender_city?: string
   }
 ): string {
   if (!text) return ''
@@ -56,6 +65,7 @@ export function applyAllPlaceholders(
     .replace(/\{\{?today_date\}\}?/gi, today)
     .replace(/\{\{?sender_email\}\}?/gi, variables.sender_email || 'pelamar@email.com')
     .replace(/\{\{?sender_phone\}\}?/gi, variables.sender_phone || '0812-3456-7890')
+    .replace(/\{\{?sender_city\}\}?/gi, variables.sender_city ?? '')
 
   return result
 }
@@ -102,7 +112,7 @@ export function createDefaultLayoutConfig(
     {
       id: 'block_date',
       type: 'date',
-      content: 'Jakarta, {{today_date}}',
+      content: '{{sender_city}}, {{today_date}}',
       align: 'right',
       style: {
         marginBottom: 16,
@@ -428,6 +438,7 @@ export function renderLayoutToHtml(
     sender_email?: string
     sender_phone?: string
     today_date?: string
+    sender_city?: string
   },
   options: {
     mode?: 'desktop' | 'mobile'

@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Save, Loader2, Sparkles, User, Mail, FileText, CheckCircle2 } from 'lucide-react'
+import { Save, Loader2, Sparkles, User, Mail, FileText, CheckCircle2, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import type { EmailSettingsRow } from '@/types/config'
 import { saveEmailSettingsAction } from '@/app/actions/settings'
@@ -20,6 +20,7 @@ interface SenderSettingsFormProps {
 export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps) {
   const [senderName, setSenderName] = React.useState(initialSettings?.sender_name || '')
   const [senderEmail, setSenderEmail] = React.useState(initialSettings?.sender_email || '')
+  const [senderCity, setSenderCity] = React.useState((initialSettings as any)?.sender_city || '')
   const [defaultSubject, setDefaultSubject] = React.useState(initialSettings?.default_subject || '')
   const [defaultMessage, setDefaultMessage] = React.useState(initialSettings?.default_message || '')
   const [isSaving, setIsSaving] = React.useState(false)
@@ -29,6 +30,7 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
     if (initialSettings) {
       setSenderName(initialSettings.sender_name || '')
       setSenderEmail(initialSettings.sender_email || '')
+      setSenderCity((initialSettings as any)?.sender_city || '')
       setDefaultSubject(initialSettings.default_subject || '')
       setDefaultMessage(initialSettings.default_message || '')
     }
@@ -72,6 +74,7 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
     const result = await saveEmailSettingsAction({
       sender_name: senderName.trim(),
       sender_email: senderEmail.trim(),
+      sender_city: senderCity.trim() || undefined,
       default_subject: defaultSubject.trim() || undefined,
       default_message: defaultMessage.trim() || undefined,
     })
@@ -89,12 +92,14 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
     sender_name: senderName || 'Nama Pelamar',
     company_name: 'PT Inovasi Digital Indonesia',
     position: 'Software Engineer',
+    sender_city: senderCity || 'Jakarta',
   })
 
   const previewMessage = replacePlaceholders(defaultMessage, {
     sender_name: senderName || 'Nama Pelamar',
     company_name: 'PT Inovasi Digital Indonesia',
     position: 'Software Engineer',
+    sender_city: senderCity || 'Jakarta',
   })
 
   return (
@@ -152,6 +157,27 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Email ini akan digunakan sebagai alamat balasan (*reply-to*) oleh HRD.
+              </p>
+            </div>
+
+            {/* Kota / Tempat Pengirim */}
+            <div className="space-y-1.5">
+              <Label htmlFor="sender_city" className="text-xs font-medium">
+                Kota / Tempat Pengirim
+              </Label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="sender_city"
+                  value={senderCity}
+                  onChange={(e) => setSenderCity(e.target.value)}
+                  placeholder="Contoh: Jakarta"
+                  className="pl-9 h-9 text-xs sm:text-sm"
+                  disabled={isSaving}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Digunakan untuk placeholder <code>{'{{sender_city}}'}</code> pada baris tanggal surat (misal: <em>Jakarta, 12 November 2026</em>).
               </p>
             </div>
           </CardContent>
@@ -317,6 +343,10 @@ export function SenderSettingsForm({ initialSettings }: SenderSettingsFormProps)
                   <div className="flex items-center justify-between">
                     <code>{'{sender_name}'}</code>
                     <span>→ {senderName || 'Nama Pengirim'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <code>{'{sender_city}'}</code>
+                    <span>→ {senderCity || <em className="text-muted-foreground/60">(belum diisi)</em>}</span>
                   </div>
                 </div>
               </div>

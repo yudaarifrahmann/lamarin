@@ -36,6 +36,7 @@ export interface Database {
           user_id: string
           sender_name: string
           sender_email: string
+          sender_city: string | null
           default_subject: string | null
           default_message: string | null
           created_at: string
@@ -46,6 +47,7 @@ export interface Database {
           user_id: string
           sender_name: string
           sender_email: string
+          sender_city?: string | null
           default_subject?: string | null
           default_message?: string | null
           created_at?: string
@@ -56,6 +58,7 @@ export interface Database {
           user_id?: string
           sender_name?: string
           sender_email?: string
+          sender_city?: string | null
           default_subject?: string | null
           default_message?: string | null
           created_at?: string

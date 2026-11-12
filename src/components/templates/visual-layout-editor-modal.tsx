@@ -461,6 +461,7 @@ export function VisualLayoutEditorModal({
     sender_name: senderName || 'Budi Pratama, S.Kom.',
     sender_email: senderEmail || 'budi.pratama@email.com',
     sender_phone: senderPhone || '0812-3456-7890',
+    sender_city: 'Jakarta',
     company_name: 'PT Teknologi Digital Indonesia',
     position: 'Full Stack Web Developer',
     today_date: getFormattedTodayDate(),

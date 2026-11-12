@@ -18,6 +18,7 @@ import type { ActionResponse } from '@/app/actions/documents'
 export async function saveEmailSettingsAction(payload: {
   sender_name: string
   sender_email: string
+  sender_city?: string
   default_subject?: string
   default_message?: string
 }): Promise<ActionResponse<EmailSettingsRow>> {
@@ -40,23 +41,44 @@ export async function saveEmailSettingsAction(payload: {
       return { success: false, error: 'Format email pengirim tidak valid.' }
     }
 
-    const { data, error } = await supabase
+    const upsertPayload: Record<string, unknown> = {
+      user_id: user.id,
+      sender_name: senderName,
+      sender_email: senderEmail,
+      sender_city: payload.sender_city?.trim() || null,
+      default_subject: payload.default_subject?.trim() || null,
+      default_message: payload.default_message || null,
+    }
+
+    let { data, error } = await supabase
       .from('email_settings')
-      .upsert(
-        {
-          user_id: user.id,
-          sender_name: senderName,
-          sender_email: senderEmail,
-          default_subject: payload.default_subject?.trim() || null,
-          default_message: payload.default_message || null,
-        },
-        { onConflict: 'user_id' }
-      )
+      .upsert(upsertPayload as any, { onConflict: 'user_id' })
       .select()
       .single()
 
-    if (error) {
-      return { success: false, error: `Gagal menyimpan konfigurasi email: ${error.message}` }
+    // Graceful fallback: if sender_city column not yet in schema cache
+    if (error && error.message.includes('sender_city')) {
+      const fallback = await supabase
+        .from('email_settings')
+        .upsert(
+          {
+            user_id: user.id,
+            sender_name: senderName,
+            sender_email: senderEmail,
+            default_subject: payload.default_subject?.trim() || null,
+            default_message: payload.default_message || null,
+          },
+          { onConflict: 'user_id' }
+        )
+        .select()
+        .single()
+
+      data = fallback.data
+      error = fallback.error
+    }
+
+    if (error || !data) {
+      return { success: false, error: `Gagal menyimpan konfigurasi email: ${error?.message || 'Data kosong'}` }
     }
 
     revalidatePath('/konfigurasi-email')

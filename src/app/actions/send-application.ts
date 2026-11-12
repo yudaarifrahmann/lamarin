@@ -7,7 +7,7 @@ import { buildMimeMessage, type EmailAttachment } from '@/lib/gmail/mime'
 import { decryptToken } from '@/lib/encryption'
 import { replacePlaceholders } from '@/lib/placeholders'
 import { isPdfDocument, generateMergedPdfFilename, mergePdfBuffers } from '@/lib/pdf/merger'
-import { renderLayoutToHtml } from '@/lib/templates/layout-engine'
+import { renderLayoutToHtml, getFormattedTodayDate } from '@/lib/templates/layout-engine'
 import type { TemplateLayoutConfig } from '@/types/template-layout'
 import type { ActionResponse } from '@/app/actions/documents'
 
@@ -197,6 +197,9 @@ export async function sendApplicationAction(
     // Authorized Gmail address from user's verified gmail_connections record
     const senderEmail = gmailConn.gmail_email
 
+    // Sender city from email_settings (may be null if not configured)
+    const senderCity = (emailSettings as any)?.sender_city as string | null | undefined
+
     // 7. Resolve Subject (Manual -> Chosen/Default Template -> Email Settings -> Fallback)
     const rawSubject =
       payload.subject?.trim() ||
@@ -208,6 +211,7 @@ export async function sendApplicationAction(
       company_name: companyName,
       position: position,
       sender_name: senderName,
+      sender_city: senderCity || '',
     })
 
     // 8. Resolve Message Body
@@ -228,6 +232,7 @@ export async function sendApplicationAction(
       company_name: companyName,
       position: position,
       sender_name: senderName,
+      sender_city: senderCity || '',
     })
 
     // 9. Verify and Download Selected Documents from private Supabase Storage
@@ -442,6 +447,8 @@ export async function sendApplicationAction(
           position: position,
           sender_name: senderName,
           sender_email: senderEmail,
+          sender_city: senderCity || '',
+          today_date: getFormattedTodayDate(),
         },
         { forEmail: true }
       )

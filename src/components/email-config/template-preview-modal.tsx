@@ -41,6 +41,7 @@ export function TemplatePreviewModal({
     sender_name: senderName || 'Nama Pengirim',
     company_name: testCompany || 'Nama Perusahaan',
     position: testPosition || 'Software Engineer',
+    sender_city: 'Jakarta',
     today_date: getFormattedTodayDate(),
   }
 

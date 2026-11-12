@@ -24,12 +24,25 @@ export const SUPPORTED_PLACEHOLDERS: PlaceholderVariable[] = [
     sample: 'Budi Pratama',
     description: 'Nama lengkap Anda sebagai pelamar kerja',
   },
+  {
+    tag: '{{sender_city}}',
+    label: 'Kota Pengirim',
+    sample: 'Jakarta',
+    description: 'Kota tempat tinggal pengirim (digunakan pada baris tanggal surat)',
+  },
+  {
+    tag: '{{today_date}}',
+    label: 'Tanggal Hari Ini',
+    sample: 'Jakarta, 12 November 2026',
+    description: 'Tanggal otomatis saat surat dibuat, dalam zona waktu Asia/Jakarta',
+  },
 ]
 
 export interface PlaceholderValues {
   company_name?: string
   position?: string
   sender_name?: string
+  sender_city?: string
 }
 
 /**
@@ -59,5 +72,10 @@ export function replacePlaceholders(
       variables.sender_name !== undefined && variables.sender_name !== ''
         ? variables.sender_name
         : 'Pelamar Kerja'
+    )
+    .replace(
+      /\{\{?sender_city\}\}?/gi,
+      // Empty string when not configured — do NOT show raw placeholder
+      variables.sender_city ?? ''
     )
 }
