@@ -1,7 +1,22 @@
 'use client'
 
 import * as React from 'react'
-import { Upload, FileText, X, Loader2, Plus, AlertCircle, CheckCircle2, ImageIcon } from 'lucide-react'
+import {
+  Upload,
+  FileText,
+  X,
+  Loader2,
+  Plus,
+  AlertCircle,
+  CheckCircle2,
+  ImageIcon,
+  RefreshCw,
+  Info,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -14,7 +29,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-
 import { formatBytes } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import { saveDocumentMetadataAction } from '@/app/actions/documents'
@@ -22,13 +36,14 @@ import { saveDocumentMetadataAction } from '@/app/actions/documents'
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STORAGE_BUCKET = 'application-documents'
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB
-const UPLOAD_TIMEOUT_MS = 60_000 // 60 s per file — if Supabase doesn't respond, abort
+const UPLOAD_TIMEOUT_MS = 60_000 // 60s per file
 
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
+  'image/jpg',
   'image/png',
   'image/webp',
 ])
@@ -39,16 +54,36 @@ interface SelectedFileItem {
   id: string
   file: File
   documentName: string
-  /** Validation error shown before upload starts */
   validationError?: string
 }
 
-type UploadItemStatus =
-  | { phase: 'idle' }
-  | { phase: 'uploading'; progressPct: number }
-  | { phase: 'saving' }
-  | { phase: 'done' }
-  | { phase: 'error'; message: string }
+type UploadPhase = 'idle' | 'uploading' | 'saving' | 'done' | 'error'
+
+interface UploadItemStatus {
+  phase: UploadPhase
+  progressPct: number
+  message?: string
+  errorCategory?: string
+  storagePath?: string
+  uploadMethod?: 'XHR-Direct' | 'Supabase-SDK'
+}
+
+export interface UploadDiagnosticEntry {
+  id: string
+  timestamp: string
+  filename: string
+  fileSize: number
+  reportedType: string
+  resolvedMime: string
+  method: string
+  progressPct: number
+  status: UploadPhase
+  errorCategory?: string
+  httpStatus?: number
+  rawError?: string
+  userAgent: string
+  isOnline: boolean
+}
 
 interface DocumentUploadModalProps {
   open: boolean
@@ -56,84 +91,89 @@ interface DocumentUploadModalProps {
   onSuccess: () => void
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers: MIME & File Normalization ────────────────────────────────────────
+
+/**
+ * Normalizes and resolves exact MIME type for a file.
+ * Handles Android Chrome quirks where file.type can be empty or generic application/octet-stream.
+ */
+export function resolveMimeType(file: File): string {
+  const rawType = (file.type || '').trim().toLowerCase()
+  if (rawType && rawType !== 'application/octet-stream') {
+    const base = rawType.split(';')[0].trim()
+    if (ALLOWED_MIME_TYPES.has(base)) {
+      return base === 'image/jpg' ? 'image/jpeg' : base
+    }
+  }
+
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'pdf':
+      return 'application/pdf'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'png':
+      return 'image/png'
+    case 'webp':
+      return 'image/webp'
+    case 'doc':
+      return 'application/msword'
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    default:
+      return rawType || 'application/octet-stream'
+  }
+}
+
+/**
+ * Validates file size and format before upload starts.
+ */
 function validateFile(file: File): string | null {
   if (file.size === 0) return 'File kosong (0 byte).'
-  if (file.size > MAX_FILE_SIZE_BYTES)
+  if (file.size > MAX_FILE_SIZE_BYTES) {
     return `Ukuran ${formatBytes(file.size)} melebihi batas 10MB.`
-  const mime = file.type || ''
+  }
+  const mime = resolveMimeType(file)
   const ext = '.' + (file.name.split('.').pop()?.toLowerCase() ?? '')
-  if (!ALLOWED_MIME_TYPES.has(mime) && !ALLOWED_EXTENSIONS.includes(ext))
-    return `Format tidak didukung: ${mime || ext}. Gunakan PDF, DOC, DOCX, JPG, PNG, atau WebP.`
+  if (!ALLOWED_MIME_TYPES.has(mime) && !ALLOWED_EXTENSIONS.includes(ext)) {
+    return `Format tidak didukung: ${file.type || ext}. Gunakan PDF, DOC, DOCX, JPG, PNG, atau WebP.`
+  }
   return null
 }
 
 /**
- * Upload a single file directly from the browser to Supabase Storage.
- * Uses XMLHttpRequest so we get real byte-level progress events.
- * Resolves with the storage path on success, rejects with an Error on failure.
- * AbortSignal is used to cancel in-flight requests on timeout or user action.
+ * Human-friendly categorized error formatting
  */
-function uploadFileToStorage(
-  file: File,
-  storagePath: string,
-  supabaseUrl: string,
-  anonKey: string,
-  accessToken: string,
-  onProgress: (pct: number) => void,
-  signal: AbortSignal
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = `${supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`
-
-    const xhr = new XMLHttpRequest()
-
-    // Abort when signal fires
-    signal.addEventListener('abort', () => {
-      xhr.abort()
-      reject(new Error('Upload dibatalkan atau waktu habis (timeout).'))
-    })
-
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) {
-        onProgress(Math.round((e.loaded / e.total) * 100))
-      }
-    })
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(100)
-        resolve()
-      } else {
-        let errMsg = `HTTP ${xhr.status}`
-        try {
-          const body = JSON.parse(xhr.responseText)
-          errMsg = body?.message || body?.error || errMsg
-        } catch {
-          // ignore JSON parse error
-        }
-        reject(new Error(`Gagal mengunggah ke Storage: ${errMsg}`))
-      }
-    })
-
-    xhr.addEventListener('error', () => {
-      reject(new Error('Koneksi ke Supabase Storage terputus. Periksa koneksi internet Anda.'))
-    })
-
-    xhr.addEventListener('abort', () => {
-      reject(new Error('Upload dibatalkan.'))
-    })
-
-    xhr.open('POST', url, true)
-    xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
-    xhr.setRequestHeader('x-upsert', 'false')
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
-
-    xhr.send(file)
-  })
+function formatHumanError(
+  category: string,
+  rawMessage: string,
+  httpStatus?: number,
+  mimeType?: string
+): string {
+  switch (category) {
+    case 'TIMEOUT':
+      return 'Waktu upload habis (timeout 60 detik). Periksa stabilitas koneksi Anda.'
+    case 'ABORTED':
+      return 'Upload dibatalkan oleh pengguna.'
+    case 'AUTH_OR_RLS':
+      return 'Akses ditolak oleh Supabase Storage (RLS). Pastikan sesi login aktif.'
+    case 'FILE_TOO_LARGE':
+      return 'Ukuran file melebihi batas maksimum 10MB yang diizinkan bucket.'
+    case 'INVALID_MIME':
+      return `Format file (${mimeType || 'tidak dikenal'}) ditolak oleh Supabase Storage.`
+    case 'SERVER_ERROR':
+      return `Server Supabase Storage mengalami gangguan (HTTP ${httpStatus || 500}). Silakan coba lagi.`
+    case 'METADATA_ERROR':
+      return `File tersimpan di Storage, namun gagal mencatat data: ${rawMessage}`
+    case 'NETWORK_ERROR':
+    default:
+      return `Gagal mengunggah file ke Storage: ${rawMessage || 'Kesalahan jaringan'}`
+  }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
 export function DocumentUploadModal({
   open,
   onOpenChange,
@@ -142,36 +182,42 @@ export function DocumentUploadModal({
   const [items, setItems] = React.useState<SelectedFileItem[]>([])
   const [statuses, setStatuses] = React.useState<Record<string, UploadItemStatus>>({})
   const [isUploading, setIsUploading] = React.useState(false)
+  const [diagnostics, setDiagnostics] = React.useState<UploadDiagnosticEntry[]>([])
+  const [showDiagnostics, setShowDiagnostics] = React.useState(false)
+  const [isCopied, setIsCopied] = React.useState(false)
+
   const fileInputRef = React.useRef<HTMLInputElement>(null)
-  // Keep AbortControllers per item so we can cancel individual uploads
   const abortControllersRef = React.useRef<Record<string, AbortController>>({})
 
   // ── Reset state when modal closes ──────────────────────────────────────────
   React.useEffect(() => {
     if (!open) {
-      // Cancel any in-flight uploads when modal is closed
       Object.values(abortControllersRef.current).forEach((ac) => ac.abort())
       abortControllersRef.current = {}
       setItems([])
       setStatuses({})
       setIsUploading(false)
+      setShowDiagnostics(false)
     }
   }, [open])
-
-  // ── Derived state ──────────────────────────────────────────────────────────
-  const hasValidationErrors = items.some((it) => it.validationError)
-  const allDone =
-    items.length > 0 &&
-    items.every((it) => {
-      const s = statuses[it.id]
-      return s?.phase === 'done' || s?.phase === 'error'
-    })
 
   const setStatus = (id: string, status: UploadItemStatus) => {
     setStatuses((prev) => ({ ...prev, [id]: status }))
   }
 
-  // ── File selection ─────────────────────────────────────────────────────────
+  const logDiagnostic = (entry: UploadDiagnosticEntry) => {
+    setDiagnostics((prev) => {
+      const idx = prev.findIndex((d) => d.id === entry.id)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = entry
+        return next
+      }
+      return [entry, ...prev]
+    })
+  }
+
+  // ── File Selection ─────────────────────────────────────────────────────────
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
@@ -179,7 +225,7 @@ export function DocumentUploadModal({
     const newItems: SelectedFileItem[] = Array.from(files).map((file) => {
       const fallbackName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ')
       return {
-        id: `${file.name}-${Date.now()}-${Math.random()}`,
+        id: `${file.name}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         file,
         documentName: fallbackName,
         validationError: validateFile(file) ?? undefined,
@@ -187,7 +233,6 @@ export function DocumentUploadModal({
     })
 
     setItems((prev) => [...prev, ...newItems])
-    // Reset so the same file can be re-added
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -208,15 +253,235 @@ export function DocumentUploadModal({
     })
   }
 
-  // ── Upload all ─────────────────────────────────────────────────────────────
+  // ── Core Upload Execution for a Single Item ────────────────────────────────
+  const uploadSingleItem = async (
+    item: SelectedFileItem,
+    supabaseClient: ReturnType<typeof createClient>,
+    userId: string,
+    accessToken: string,
+    supabaseUrl: string,
+    anonKey: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const resolvedMime = resolveMimeType(item.file)
+    const sanitizedFileName = item.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `${userId}/${Date.now()}-${sanitizedFileName}`
+
+    const ac = new AbortController()
+    abortControllersRef.current[item.id] = ac
+    let isTimeout = false
+    const timeoutId = setTimeout(() => {
+      isTimeout = true
+      ac.abort()
+    }, UPLOAD_TIMEOUT_MS)
+
+    const diag: UploadDiagnosticEntry = {
+      id: item.id,
+      timestamp: new Date().toISOString(),
+      filename: item.file.name,
+      fileSize: item.file.size,
+      reportedType: item.file.type || '(empty)',
+      resolvedMime,
+      method: 'XHR-Direct',
+      progressPct: 0,
+      status: 'uploading',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+      isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    }
+
+    try {
+      setStatus(item.id, { phase: 'uploading', progressPct: 0, uploadMethod: 'XHR-Direct' })
+
+      // ── Step A: Read file bytes into in-memory Blob upfront (Android Safe) ──
+      // This prevents Android ContentProvider stream drop & net::ERR_UPLOAD_FILE_CHANGED
+      const arrayBuffer = await item.file.arrayBuffer()
+      const safeBlob = new Blob([arrayBuffer], { type: resolvedMime })
+
+      // ── Step B: Upload directly to Supabase Storage (XHR with Fallback) ──
+      let uploadSucceeded = false
+      let lastXhrError: string | null = null
+      let lastHttpStatus: number | undefined = undefined
+
+      try {
+        // Attempt 1: Direct XHR with true byte-level progress
+        await new Promise<void>((resolve, reject) => {
+          const url = `${supabaseUrl}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`
+          const xhr = new XMLHttpRequest()
+
+          ac.signal.addEventListener('abort', () => {
+            xhr.abort()
+            if (isTimeout) {
+              reject(new Error('TIMEOUT'))
+            } else {
+              reject(new Error('ABORTED'))
+            }
+          })
+
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable && e.total > 0) {
+              const pct = Math.min(95, Math.round((e.loaded / e.total) * 100))
+              setStatus(item.id, { phase: 'uploading', progressPct: pct, uploadMethod: 'XHR-Direct' })
+              diag.progressPct = pct
+            }
+          })
+
+          xhr.addEventListener('load', () => {
+            lastHttpStatus = xhr.status
+            diag.httpStatus = xhr.status
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve()
+            } else {
+              let msg = `HTTP ${xhr.status}`
+              try {
+                const body = JSON.parse(xhr.responseText)
+                msg = body?.message || body?.error || msg
+              } catch {
+                // ignore
+              }
+              reject(new Error(msg))
+            }
+          })
+
+          xhr.addEventListener('error', () => {
+            diag.httpStatus = xhr.status
+            reject(new Error('XHR_NETWORK_ERROR'))
+          })
+
+          xhr.addEventListener('abort', () => {
+            if (isTimeout) reject(new Error('TIMEOUT'))
+            else reject(new Error('ABORTED'))
+          })
+
+          xhr.open('POST', url, true)
+          // Critical Supabase API Gateway headers
+          xhr.setRequestHeader('apikey', anonKey)
+          xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+          xhr.setRequestHeader('x-upsert', 'false')
+
+          // Use FormData wrapping to conform with Supabase Storage multipart parser
+          const fd = new FormData()
+          fd.append('cacheControl', '3600')
+          fd.append('', safeBlob, item.file.name)
+
+          xhr.send(fd)
+        })
+
+        uploadSucceeded = true
+      } catch (xhrErr: unknown) {
+        const rawMsg = xhrErr instanceof Error ? xhrErr.message : String(xhrErr)
+        lastXhrError = rawMsg
+
+        if (rawMsg === 'TIMEOUT' || rawMsg === 'ABORTED') {
+          throw xhrErr
+        }
+
+        // If XHR encounters network/CORS error on Android Chrome, fallback to Supabase SDK
+        diag.method = 'Supabase-SDK (Fallback)'
+        setStatus(item.id, {
+          phase: 'uploading',
+          progressPct: 50,
+          uploadMethod: 'Supabase-SDK',
+        })
+
+        const sdkResult = await supabaseClient.storage
+          .from(STORAGE_BUCKET)
+          .upload(storagePath, safeBlob, {
+            contentType: resolvedMime,
+            upsert: false,
+          })
+
+        if (sdkResult.error) {
+          diag.rawError = `SDK Error: ${sdkResult.error.message} (prev XHR: ${lastXhrError})`
+          diag.httpStatus = (sdkResult.error as any)?.status || (sdkResult.error as any)?.statusCode
+          throw new Error(sdkResult.error.message)
+        }
+
+        uploadSucceeded = true
+      }
+
+      clearTimeout(timeoutId)
+
+      if (!uploadSucceeded) {
+        throw new Error(lastXhrError || 'Gagal mengunggah file ke Storage.')
+      }
+
+      // ── Step C: Save metadata to PostgreSQL ─────────────────────────────────
+      setStatus(item.id, {
+        phase: 'saving',
+        progressPct: 95,
+        storagePath,
+      })
+      diag.status = 'saving'
+
+      const metaResult = await saveDocumentMetadataAction({
+        storagePath,
+        documentName: item.documentName || item.file.name.replace(/\.[^/.]+$/, ''),
+        originalFilename: item.file.name,
+        mimeType: resolvedMime,
+        fileSize: item.file.size,
+      })
+
+      if (metaResult.success) {
+        setStatus(item.id, { phase: 'done', progressPct: 100, storagePath })
+        diag.status = 'done'
+        diag.progressPct = 100
+        logDiagnostic(diag)
+        return { success: true }
+      } else {
+        const errDesc = metaResult.error || 'Gagal menyimpan metadata ke database.'
+        setStatus(item.id, {
+          phase: 'error',
+          progressPct: 95,
+          message: errDesc,
+          errorCategory: 'METADATA_ERROR',
+          storagePath,
+        })
+        diag.status = 'error'
+        diag.errorCategory = 'METADATA_ERROR'
+        diag.rawError = errDesc
+        logDiagnostic(diag)
+        return { success: false, error: errDesc }
+      }
+    } catch (err: unknown) {
+      clearTimeout(timeoutId)
+      const rawMsg = err instanceof Error ? err.message : String(err)
+      let cat = 'NETWORK_ERROR'
+
+      if (rawMsg === 'TIMEOUT' || isTimeout) cat = 'TIMEOUT'
+      else if (rawMsg === 'ABORTED') cat = 'ABORTED'
+      else if (diag.httpStatus === 401 || diag.httpStatus === 403 || rawMsg.includes('security') || rawMsg.includes('Unauthorized')) {
+        cat = 'AUTH_OR_RLS'
+      } else if (diag.httpStatus === 413 || rawMsg.includes('exceeded') || rawMsg.includes('large')) {
+        cat = 'FILE_TOO_LARGE'
+      } else if (diag.httpStatus === 415 || rawMsg.includes('mime type')) {
+        cat = 'INVALID_MIME'
+      } else if (diag.httpStatus && diag.httpStatus >= 500) {
+        cat = 'SERVER_ERROR'
+      }
+
+      const formatted = formatHumanError(cat, rawMsg, diag.httpStatus, resolvedMime)
+      setStatus(item.id, {
+        phase: 'error',
+        progressPct: 0,
+        message: formatted,
+        errorCategory: cat,
+      })
+      diag.status = 'error'
+      diag.errorCategory = cat
+      diag.rawError = rawMsg
+      logDiagnostic(diag)
+      return { success: false, error: formatted }
+    } finally {
+      delete abortControllersRef.current[item.id]
+    }
+  }
+
+  // ── Handle Upload All ──────────────────────────────────────────────────────
   const handleUploadAll = async () => {
     const validItems = items.filter((it) => !it.validationError)
-    if (validItems.length === 0) return
-    if (isUploading) return // prevent double submit
+    if (validItems.length === 0 || isUploading) return
 
     setIsUploading(true)
 
-    // ── Get Supabase session (access token needed for Storage REST API) ────
     const supabase = createClient()
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
@@ -235,61 +500,17 @@ export function DocumentUploadModal({
     const errors: string[] = []
 
     for (const item of validItems) {
-      // Skip already finished items (if user re-triggers accidentally)
       const prevStatus = statuses[item.id]
       if (prevStatus?.phase === 'done') {
         successCount++
         continue
       }
 
-      setStatus(item.id, { phase: 'uploading', progressPct: 0 })
-
-      // Build storage path: {user_id}/{timestamp}-{sanitized_filename}
-      const sanitizedFileName = item.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const storagePath = `${userId}/${Date.now()}-${sanitizedFileName}`
-
-      // AbortController: fires after UPLOAD_TIMEOUT_MS of no completion
-      const ac = new AbortController()
-      abortControllersRef.current[item.id] = ac
-      const timeoutId = setTimeout(() => ac.abort(), UPLOAD_TIMEOUT_MS)
-
-      try {
-        // ── Step 1: Direct browser → Supabase Storage upload ──────────────
-        await uploadFileToStorage(
-          item.file,
-          storagePath,
-          supabaseUrl,
-          anonKey,
-          accessToken,
-          (pct) => setStatus(item.id, { phase: 'uploading', progressPct: pct }),
-          ac.signal
-        )
-        clearTimeout(timeoutId)
-
-        // ── Step 2: Server Action saves metadata to DB ─────────────────────
-        setStatus(item.id, { phase: 'saving' })
-        const result = await saveDocumentMetadataAction({
-          storagePath,
-          documentName: item.documentName || item.file.name.replace(/\.[^/.]+$/, ''),
-          originalFilename: item.file.name,
-          mimeType: item.file.type || 'application/octet-stream',
-          fileSize: item.file.size,
-        })
-
-        if (result.success) {
-          setStatus(item.id, { phase: 'done' })
-          successCount++
-        } else {
-          setStatus(item.id, { phase: 'error', message: result.error || 'Gagal menyimpan metadata.' })
-          errors.push(`${item.documentName}: ${result.error || 'Gagal menyimpan metadata.'}`)
-        }
-      } catch (err: unknown) {
-        clearTimeout(timeoutId)
-        const msg = err instanceof Error ? err.message : 'Gagal mengunggah.'
-        setStatus(item.id, { phase: 'error', message: msg })
-        errors.push(`${item.documentName}: ${msg}`)
-      } finally {
-        delete abortControllersRef.current[item.id]
+      const res = await uploadSingleItem(item, supabase, userId, accessToken, supabaseUrl, anonKey)
+      if (res.success) {
+        successCount++
+      } else {
+        errors.push(`${item.documentName}: ${res.error}`)
       }
     }
 
@@ -302,7 +523,6 @@ export function DocumentUploadModal({
           : `${successCount} dokumen berhasil diunggah ke Supabase Storage.`
       )
       onSuccess()
-      // Auto-close only if everything succeeded
       if (errors.length === 0) {
         onOpenChange(false)
       }
@@ -313,49 +533,110 @@ export function DocumentUploadModal({
     }
   }
 
-  // ── Render helpers ─────────────────────────────────────────────────────────
+  // ── Handle Retry for a Single Failed Item ──────────────────────────────────
+  const handleRetryItem = async (item: SelectedFileItem) => {
+    if (isUploading) return
+    setIsUploading(true)
+
+    const supabase = createClient()
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+
+    if (sessionError || !session) {
+      toast.error('Sesi login telah berakhir. Silakan login kembali.')
+      setIsUploading(false)
+      return
+    }
+
+    const res = await uploadSingleItem(
+      item,
+      supabase,
+      session.user.id,
+      session.access_token,
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+
+    setIsUploading(false)
+
+    if (res.success) {
+      toast.success(`Dokumen "${item.documentName}" berhasil diunggah!`)
+      onSuccess()
+    } else {
+      toast.error(res.error || 'Gagal mengunggah dokumen.')
+    }
+  }
+
+  const handleCopyDiagnostics = () => {
+    if (diagnostics.length === 0) return
+    navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2))
+    setIsCopied(true)
+    setTimeout(() => setIsCopied(false), 2000)
+    toast.info('Data diagnostik disalin ke clipboard.')
+  }
+
+  // ── Render Helpers ─────────────────────────────────────────────────────────
   const getItemIcon = (item: SelectedFileItem) => {
-    if (item.file.type.startsWith('image/')) {
+    const mime = resolveMimeType(item.file)
+    if (mime.startsWith('image/')) {
       return <ImageIcon className="h-4 w-4" />
     }
     return <FileText className="h-4 w-4" />
   }
 
-  const getStatusBadge = (id: string) => {
-    const s = statuses[id]
+  const getStatusBadge = (item: SelectedFileItem) => {
+    const s = statuses[item.id]
     if (!s || s.phase === 'idle') return null
-    if (s.phase === 'uploading')
+    if (s.phase === 'uploading') {
       return (
-        <span className="text-[10px] text-primary font-medium">
-          Mengunggah... {s.progressPct}%
+        <span className="text-[10px] text-primary font-medium flex items-center gap-1">
+          <span>Mengunggah... {s.progressPct}%</span>
+          {s.uploadMethod && (
+            <span className="text-[9px] text-muted-foreground font-mono">({s.uploadMethod})</span>
+          )}
         </span>
       )
-    if (s.phase === 'saving')
+    }
+    if (s.phase === 'saving') {
       return <span className="text-[10px] text-primary font-medium">Menyimpan metadata...</span>
-    if (s.phase === 'done')
+    }
+    if (s.phase === 'done') {
       return (
         <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
           <CheckCircle2 className="h-3 w-3" />
-          Berhasil
+          Berhasil Disimpan
         </span>
       )
-    if (s.phase === 'error')
+    }
+    if (s.phase === 'error') {
       return (
-        <span className="text-[10px] text-destructive font-medium flex items-center gap-1 max-w-[200px] truncate" title={s.message}>
-          <AlertCircle className="h-3 w-3 shrink-0" />
-          {s.message}
-        </span>
+        <div className="flex items-center gap-2 max-w-full">
+          <span
+            className="text-[10px] text-destructive font-medium flex items-center gap-1 truncate"
+            title={s.message}
+          >
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            <span className="truncate">{s.message}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => handleRetryItem(item)}
+            className="text-[10px] text-primary hover:underline font-semibold shrink-0 cursor-pointer inline-flex items-center gap-0.5"
+            disabled={isUploading}
+          >
+            <RefreshCw className="h-2.5 w-2.5" />
+            <span>Coba Lagi</span>
+          </button>
+        </div>
       )
+    }
   }
 
-  const getItemProgress = (id: string): number => {
-    const s = statuses[id]
-    if (!s || s.phase === 'idle') return 0
-    if (s.phase === 'uploading') return Math.round(s.progressPct * 0.9) // 0–90%: uploading
-    if (s.phase === 'saving') return 95 // 90–95%: saving metadata
-    if (s.phase === 'done') return 100
-    return 0
-  }
+  const allDone =
+    items.length > 0 &&
+    items.every((it) => {
+      const s = statuses[it.id]
+      return s?.phase === 'done' || s?.phase === 'error'
+    })
 
   const uploadingCount = items.filter((it) => {
     const s = statuses[it.id]
@@ -366,14 +647,14 @@ export function DocumentUploadModal({
 
   return (
     <Dialog open={open} onOpenChange={isUploading ? undefined : onOpenChange}>
-      <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col p-6">
+      <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col p-4 sm:p-6 overflow-hidden">
         <DialogHeader className="pb-2">
           <DialogTitle className="text-lg font-bold flex items-center gap-2">
             <Upload className="h-5 w-5 text-primary" />
             <span>Unggah Dokumen Lamaran</span>
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Pilih berkas dokumen pendukung. File diunggah langsung dari browser ke Supabase Storage (aman, cepat, ada progress nyata).
+            Unggah berkas CV, résumé, SKCK, atau ijazah langsung ke Supabase Storage (Kompatibel dengan Desktop & Chrome Android).
           </DialogDescription>
         </DialogHeader>
 
@@ -382,7 +663,7 @@ export function DocumentUploadModal({
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf"
+          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
           className="hidden"
           onChange={handleFileChange}
           disabled={isUploading}
@@ -391,7 +672,7 @@ export function DocumentUploadModal({
         {/* Dropzone */}
         <div
           onClick={() => !isUploading && fileInputRef.current?.click()}
-          className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl cursor-pointer transition-colors text-center group ${
+          className={`flex flex-col items-center justify-center p-5 sm:p-6 border-2 border-dashed rounded-xl cursor-pointer transition-colors text-center group ${
             isUploading
               ? 'border-border/40 opacity-50 cursor-not-allowed'
               : 'border-border/80 hover:border-primary/50 hover:bg-muted/40'
@@ -401,16 +682,16 @@ export function DocumentUploadModal({
             <Plus className="h-5 w-5" />
           </div>
           <p className="text-xs sm:text-sm font-semibold text-foreground">
-            Klik untuk memilih berkas dari perangkat
+            Pilih dokumen dari galeri atau berkas perangkat
           </p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            PDF, DOC, DOCX, JPG, PNG, WebP — maks. 10MB per berkas
+            Mendukung PDF, DOC, DOCX, JPG, PNG, WebP (Maks. 10MB per file)
           </p>
         </div>
 
         {/* File List */}
         {items.length > 0 && (
-          <div className="flex-1 overflow-y-auto space-y-2.5 py-1 pr-1 max-h-[280px]">
+          <div className="flex-1 overflow-y-auto space-y-2.5 py-1 pr-1 max-h-[260px]">
             <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
               <span>
                 {items.length} berkas dipilih
@@ -423,7 +704,10 @@ export function DocumentUploadModal({
               {!isUploading && (
                 <button
                   type="button"
-                  onClick={() => { setItems([]); setStatuses({}) }}
+                  onClick={() => {
+                    setItems([])
+                    setStatuses({})
+                  }}
                   className="text-[11px] text-destructive hover:underline cursor-pointer"
                 >
                   Hapus Semua
@@ -436,7 +720,7 @@ export function DocumentUploadModal({
               const isDone = status?.phase === 'done'
               const isError = status?.phase === 'error'
               const isActive = status?.phase === 'uploading' || status?.phase === 'saving'
-              const progress = getItemProgress(item.id)
+              const progress = status?.progressPct || 0
 
               return (
                 <div
@@ -451,7 +735,6 @@ export function DocumentUploadModal({
                       : 'border-border/80'
                   }`}
                 >
-                  {/* Top row: icon + name input + size + remove */}
                   <div className="flex items-center gap-2.5">
                     <div
                       className={`p-2 rounded-lg shrink-0 ${
@@ -473,7 +756,10 @@ export function DocumentUploadModal({
 
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-2">
-                        <Label htmlFor={`name-${item.id}`} className="text-[11px] font-medium text-muted-foreground shrink-0">
+                        <Label
+                          htmlFor={`name-${item.id}`}
+                          className="text-[11px] font-medium text-muted-foreground shrink-0"
+                        >
                           #{index + 1}:
                         </Label>
                         <Input
@@ -488,9 +774,12 @@ export function DocumentUploadModal({
                           {formatBytes(item.file.size)}
                         </span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground truncate font-mono pl-6">
-                        {item.file.name}
-                      </p>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground pl-6 font-mono truncate">
+                        <span className="truncate">{item.file.name}</span>
+                        <span className="ml-2 shrink-0 text-[9px] px-1 rounded bg-muted">
+                          {resolveMimeType(item.file).split('/')[1]?.toUpperCase()}
+                        </span>
+                      </div>
                     </div>
 
                     {!isUploading && !isDone && (
@@ -505,7 +794,6 @@ export function DocumentUploadModal({
                     )}
                   </div>
 
-                  {/* Validation error */}
                   {item.validationError && (
                     <p className="text-[11px] text-destructive font-medium flex items-center gap-1 pl-10">
                       <AlertCircle className="h-3 w-3 shrink-0" />
@@ -513,19 +801,18 @@ export function DocumentUploadModal({
                     </p>
                   )}
 
-                  {/* Progress bar + status badge */}
                   {!item.validationError && (isActive || isDone || isError) && (
                     <div className="pl-10 space-y-1">
                       {!isError && (
                         <div className="h-1.5 w-full rounded-full bg-primary/20 overflow-hidden">
                           <div
-                            className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
+                            className="h-full bg-primary rounded-full transition-all duration-200 ease-out"
                             style={{ width: `${progress}%` }}
                           />
                         </div>
                       )}
                       <div className="flex items-center justify-between">
-                        {getStatusBadge(item.id)}
+                        {getStatusBadge(item)}
                         {isActive && (
                           <Loader2 className="h-3 w-3 animate-spin text-primary ml-auto" />
                         )}
@@ -538,7 +825,7 @@ export function DocumentUploadModal({
           </div>
         )}
 
-        {/* Global uploading status */}
+        {/* Global Uploading Banner */}
         {isUploading && uploadingCount > 0 && (
           <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2 text-xs text-primary">
             <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -548,22 +835,83 @@ export function DocumentUploadModal({
           </div>
         )}
 
+        {/* Collapsible Diagnostics Panel for Comparing Laptop & Android */}
+        {diagnostics.length > 0 && (
+          <div className="border border-border/80 rounded-lg p-2.5 bg-muted/20 text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowDiagnostics((prev) => !prev)}
+                className="flex items-center gap-1.5 font-medium text-muted-foreground hover:text-foreground text-[11px] cursor-pointer"
+              >
+                <Info className="h-3.5 w-3.5 text-primary" />
+                <span>Log Diagnostik Perangkat ({diagnostics.length})</span>
+                {showDiagnostics ? (
+                  <ChevronUp className="h-3 w-3" />
+                ) : (
+                  <ChevronDown className="h-3 w-3" />
+                )}
+              </button>
+
+              {showDiagnostics && (
+                <button
+                  type="button"
+                  onClick={handleCopyDiagnostics}
+                  className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline font-mono cursor-pointer"
+                >
+                  {isCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                  <span>{isCopied ? 'Tersalin' : 'Salin Data Diagnostik'}</span>
+                </button>
+              )}
+            </div>
+
+            {showDiagnostics && (
+              <div className="max-h-32 overflow-y-auto space-y-1 font-mono text-[10px] text-muted-foreground border-t border-border/40 pt-1.5">
+                {diagnostics.map((d, i) => (
+                  <div key={i} className="p-1.5 rounded bg-background border border-border/60 space-y-0.5">
+                    <div className="flex items-center justify-between font-bold text-foreground">
+                      <span className="truncate">{d.filename}</span>
+                      <span className={d.status === 'done' ? 'text-emerald-500' : 'text-destructive'}>
+                        {d.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <div>Metode: {d.method} | MIME: {d.resolvedMime}</div>
+                    {d.httpStatus && <div>HTTP Status: {d.httpStatus}</div>}
+                    {d.rawError && <div className="text-destructive truncate">Err: {d.rawError}</div>}
+                    <div className="truncate text-[9px] opacity-70">UA: {d.userAgent}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <DialogFooter className="pt-2 flex flex-col sm:flex-row gap-2">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => onOpenChange(false)}
-            disabled={isUploading}
+            onClick={() => {
+              if (isUploading) {
+                Object.values(abortControllersRef.current).forEach((ac) => ac.abort())
+                setIsUploading(false)
+                toast.info('Proses upload dibatalkan.')
+              }
+              onOpenChange(false)
+            }}
           >
-            {allDone ? 'Tutup' : 'Batal'}
+            {isUploading ? 'Batalkan Upload' : allDone ? 'Tutup' : 'Batal'}
           </Button>
 
           <Button
             type="button"
             size="sm"
             onClick={handleUploadAll}
-            disabled={validItemCount === 0 || isUploading || (allDone && !items.some((it) => statuses[it.id]?.phase === 'error'))}
+            disabled={
+              validItemCount === 0 ||
+              isUploading ||
+              (allDone && !items.some((it) => statuses[it.id]?.phase === 'error'))
+            }
             className="gap-2 shadow-xs"
           >
             {isUploading ? (
@@ -575,9 +923,7 @@ export function DocumentUploadModal({
               <>
                 <Upload className="h-4 w-4" />
                 <span>
-                  {validItemCount > 0
-                    ? `Unggah ${validItemCount} Dokumen`
-                    : 'Unggah Dokumen'}
+                  {validItemCount > 0 ? `Unggah ${validItemCount} Dokumen` : 'Unggah Dokumen'}
                 </span>
               </>
             )}

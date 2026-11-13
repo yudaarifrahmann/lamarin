@@ -271,9 +271,11 @@ export async function saveDocumentMetadataAction(payload: {
     }
 
     if (dbError || !dbData) {
-      // Rollback: delete the already-uploaded file so it doesn't become an orphan
-      await supabase.storage.from(STORAGE_BUCKET).remove([storagePath])
-      return { success: false, error: `Gagal menyimpan metadata dokumen: ${dbError?.message}` }
+      // Do NOT delete the uploaded file from storage, allowing user to retry metadata saving
+      return {
+        success: false,
+        error: `Gagal mencatat metadata dokumen ke database: ${dbError?.message || 'Data kosong'}. Berkas Anda tetap tersimpan di Storage.`,
+      }
     }
 
     revalidatePath('/manajemen-dokumen')
