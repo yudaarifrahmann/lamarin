@@ -1,29 +1,20 @@
+import 'server-only'
+
 import { PDFDocument } from 'pdf-lib'
 import sharp from 'sharp'
+import {
+  isImageDocument,
+  isPdfDocument,
+  generateMergedPdfFilename,
+  type PdfInputItem,
+} from './utils'
 
-export interface PdfInputItem {
-  name: string
-  buffer: Buffer
-  /** Original MIME type — used to trigger image-to-PDF conversion when not a PDF */
-  mimeType?: string
-}
-
-/** MIME types that can be converted to PDF via sharp */
-const IMAGE_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-])
-
-/** Returns true if the MIME type or filename indicates an image we can convert */
-export function isImageDocument(mimeType?: string | null, filename?: string | null): boolean {
-  if (mimeType && IMAGE_MIME_TYPES.has(mimeType.toLowerCase())) return true
-  if (filename) {
-    const ext = filename.toLowerCase().split('.').pop()
-    if (ext && ['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return true
-  }
-  return false
+// Re-export client-safe utilities for convenience in server-side modules
+export {
+  isImageDocument,
+  isPdfDocument,
+  generateMergedPdfFilename,
+  type PdfInputItem,
 }
 
 /**
@@ -95,37 +86,6 @@ export async function convertImageToPdfBuffer(
 
   const bytes = await pdf.save()
   return Buffer.from(bytes)
-}
-
-/**
- * Checks whether a document is a PDF based on its MIME type or file extension
- */
-export function isPdfDocument(mimeType?: string | null, filename?: string | null): boolean {
-  if (mimeType && mimeType.toLowerCase().includes('pdf')) {
-    return true
-  }
-  if (filename && filename.toLowerCase().endsWith('.pdf')) {
-    return true
-  }
-  return false
-}
-
-/**
- * Generates a clean, professional filename for merged PDF documents.
- * Format: Dokumen_Lamaran_[Nama_Perusahaan].pdf
- */
-export function generateMergedPdfFilename(companyName?: string): string {
-  if (!companyName || !companyName.trim()) {
-    return 'Dokumen_Lamaran.pdf'
-  }
-
-  // Remove invalid filename characters: / \ ? * : | " < >
-  const sanitized = companyName
-    .trim()
-    .replace(/[/\\?%*:|"<>]/g, '')
-    .replace(/\s+/g, '_')
-
-  return `Dokumen_Lamaran_${sanitized || 'Perusahaan'}.pdf`
 }
 
 /**
@@ -207,4 +167,3 @@ export async function mergePdfBuffers(pdfItems: PdfInputItem[]): Promise<Buffer>
     throw new Error(`Gagal menyimpan file PDF hasil penggabungan: ${errMessage}`)
   }
 }
-
