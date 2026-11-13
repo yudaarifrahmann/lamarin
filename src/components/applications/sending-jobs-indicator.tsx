@@ -140,12 +140,12 @@ export function SendingJobsIndicator({
 
   return (
     <div
-      className="fixed top-4 left-4 z-50 flex flex-col gap-2 w-[min(calc(100vw-2rem),22rem)] pointer-events-none"
+      className="fixed top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] sm:top-[20px] sm:right-[20px] z-50 flex flex-col gap-2 w-[min(calc(100vw-2rem),22rem)] pointer-events-none"
       aria-live="polite"
       aria-label="Status pengiriman lamaran"
     >
       {jobs.map((job) => (
-        <div key={job.id} className="pointer-events-auto animate-in fade-in-0 slide-in-from-left-4 duration-300">
+        <div key={job.id} className="pointer-events-auto animate-in fade-in-0 slide-in-from-right-4 duration-300">
           <JobCard job={job} onRetry={onRetry} onDismiss={onDismiss} />
         </div>
       ))}

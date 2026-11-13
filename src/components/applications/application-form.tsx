@@ -876,7 +876,7 @@ export function ApplicationForm({
         onConfirmSend={handleConfirmSend}
       />
 
-      {/* Floating top-left send status indicator */}
+      {/* Floating top-right send status indicator */}
       <SendingJobsIndicator
         jobs={sendJobs}
         onRetry={handleRetry}
