@@ -6,40 +6,10 @@ import type {
   BiodataField,
 } from '@/types/template-layout'
 import type { PlaceholderValues } from '@/lib/placeholders'
-import { replacePlaceholders } from '@/lib/placeholders'
+import { replacePlaceholders, getFormattedTodayDate } from '@/lib/placeholders'
 
-/**
- * Format today's date in formal Indonesian (e.g. 11 November 2026)
- * Always uses Asia/Jakarta timezone to match the user's local date.
- */
-export function getFormattedTodayDate(): string {
-  const months = [
-    'Januari',
-    'Februari',
-    'Maret',
-    'April',
-    'Mei',
-    'Juni',
-    'Juli',
-    'Agustus',
-    'September',
-    'Oktober',
-    'November',
-    'Desember',
-  ]
-  // Use Intl.DateTimeFormat to get the correct date in Asia/Jakarta timezone
-  const formatter = new Intl.DateTimeFormat('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-  const parts = formatter.formatToParts(new Date())
-  const day = parseInt(parts.find((p) => p.type === 'day')!.value, 10)
-  const month = parseInt(parts.find((p) => p.type === 'month')!.value, 10)
-  const year = parseInt(parts.find((p) => p.type === 'year')!.value, 10)
-  return `${day} ${months[month - 1]} ${year}`
-}
+// Re-export for backward compatibility with existing imports
+export { getFormattedTodayDate }
 
 /**
  * Replace all placeholders including date, email, phone, and standard variables

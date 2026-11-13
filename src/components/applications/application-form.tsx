@@ -13,8 +13,6 @@ import {
   X,
   Sparkles,
   AlertCircle,
-  CheckCircle2,
-  History,
   FileCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -23,7 +21,7 @@ import type { EmailSettingsRow, EmailTemplateRow } from '@/types/config'
 import { formatBytes } from '@/lib/format'
 import { SUPPORTED_PLACEHOLDERS, replacePlaceholders } from '@/lib/placeholders'
 import { isPdfDocument, isImageDocument, generateMergedPdfFilename } from '@/lib/pdf/utils'
-import { sendApplicationAction } from '@/app/actions/send-application'
+import { sendApplicationAction, type SendApplicationPayload } from '@/app/actions/send-application'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -32,6 +30,20 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ApplicationConfirmationModal } from '@/components/applications/application-confirmation-modal'
+import { SendingJobsIndicator } from '@/components/applications/sending-jobs-indicator'
+
+export interface SendJob {
+  id: string
+  companyName: string
+  position?: string
+  recipientEmail?: string
+  status: 'sending' | 'done' | 'error'
+  error?: string
+  logId?: string
+  resendId?: string
+  payload: SendApplicationPayload
+  startedAt: number
+}
 
 interface ApplicationFormProps {
   userDocuments: DocumentRow[]
@@ -72,15 +84,9 @@ export function ApplicationForm({
     }
   }, [emailTemplates, selectedTemplateId])
 
-  // Modal & sending states
+  // Modal & non-blocking send jobs state
   const [isConfirmOpen, setIsConfirmOpen] = React.useState(false)
-  const [isSending, setIsSending] = React.useState(false)
-  const [sentSuccessData, setSentSuccessData] = React.useState<{
-    company: string
-    position: string
-    email: string
-    resendId: string
-  } | null>(null)
+  const [sendJobs, setSendJobs] = React.useState<SendJob[]>([])
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
@@ -191,6 +197,7 @@ export function ApplicationForm({
     position: position || 'Software Engineer',
     sender_name: senderName,
     sender_city: senderCity || '',
+    // today_date auto-resolved by replacePlaceholders (Asia/Jakarta)
   })
 
   const previewMessage = replacePlaceholders(activeMessage, {
@@ -198,6 +205,7 @@ export function ApplicationForm({
     position: position || 'Software Engineer',
     sender_name: senderName,
     sender_city: senderCity || '',
+    // today_date auto-resolved by replacePlaceholders (Asia/Jakarta)
   })
 
   // Open confirmation
@@ -234,11 +242,9 @@ export function ApplicationForm({
     setIsConfirmOpen(true)
   }
 
-  // Confirm and Send email via Server Action
-  const handleConfirmSend = async () => {
-    setIsSending(true)
-
-    const result = await sendApplicationAction({
+  // Fire-and-forget send — closes modal immediately, tracks status via floating indicator
+  const handleConfirmSend = () => {
+    const payload: SendApplicationPayload = {
       recipient_email: recipientEmail.trim(),
       company_name: companyName.trim(),
       position: position.trim(),
@@ -246,73 +252,92 @@ export function ApplicationForm({
       message: message.trim() || undefined,
       template_id: selectedTemplateId,
       selected_document_ids: selectedDocuments.map((d) => d.id),
-    })
-
-    setIsSending(false)
-
-    if (result.success && result.data) {
-      toast.success(
-        `Email lamaran berhasil dikirim ke ${recipientEmail.trim()} via Gmail API!`
-      )
-      setIsConfirmOpen(false)
-
-      setSentSuccessData({
-        company: companyName.trim(),
-        position: position.trim(),
-        email: recipientEmail.trim(),
-        resendId: result.data.resendId,
-      })
-
-      // Reset form for next application — restore template content so it's ready immediately
-      setRecipientEmail('')
-      setCompanyName('')
-      setPosition('')
-      // Restore subject & message from the currently selected template (don't blank the form)
-      const activeTpl = emailTemplates.find((t) => t.id === selectedTemplateId)
-      setSubject(activeTpl?.subject || defaultSubjectFallback)
-      setMessage(activeTpl?.message || defaultMessageFallback)
-      setSelectedDocIds([])
-    } else {
-      toast.error(result.error || 'Gagal mengirim email lamaran.')
     }
+
+    const jobId = crypto.randomUUID()
+    const job: SendJob = {
+      id: jobId,
+      companyName: companyName.trim(),
+      position: position.trim(),
+      recipientEmail: recipientEmail.trim(),
+      status: 'sending',
+      payload,
+      startedAt: Date.now(),
+    }
+
+    // 1. Add job to indicator
+    setSendJobs((prev) => [...prev, job])
+
+    // 2. Close modal & reset form immediately
+    setIsConfirmOpen(false)
+    setRecipientEmail('')
+    setCompanyName('')
+    setPosition('')
+    const activeTpl = emailTemplates.find((t) => t.id === selectedTemplateId)
+    setSubject(activeTpl?.subject || defaultSubjectFallback)
+    setMessage(activeTpl?.message || defaultMessageFallback)
+    setSelectedDocIds([])
+
+    // 3. Run server action async — doesn't block UI
+    sendApplicationAction(payload).then((result) => {
+      if (result.success && result.data) {
+        setSendJobs((prev) =>
+          prev.map((j) =>
+            j.id === jobId
+              ? { ...j, status: 'done', logId: result.data!.logId, resendId: result.data!.resendId }
+              : j
+          )
+        )
+      } else {
+        setSendJobs((prev) =>
+          prev.map((j) =>
+            j.id === jobId
+              ? { ...j, status: 'error', error: result.error || 'Gagal mengirim email lamaran.' }
+              : j
+          )
+        )
+      }
+    })
+  }
+
+  // Retry a failed job
+  const handleRetry = (jobId: string) => {
+    const job = sendJobs.find((j) => j.id === jobId)
+    if (!job) return
+
+    const newJobId = crypto.randomUUID()
+    setSendJobs((prev) =>
+      prev.map((j) =>
+        j.id === jobId
+          ? { ...j, id: newJobId, status: 'sending', error: undefined, startedAt: Date.now() }
+          : j
+      )
+    )
+
+    sendApplicationAction(job.payload).then((result) => {
+      if (result.success && result.data) {
+        setSendJobs((prev) =>
+          prev.map((j) =>
+            j.id === newJobId
+              ? { ...j, status: 'done', logId: result.data!.logId, resendId: result.data!.resendId }
+              : j
+          )
+        )
+      } else {
+        setSendJobs((prev) =>
+          prev.map((j) =>
+            j.id === newJobId
+              ? { ...j, status: 'error', error: result.error || 'Gagal mengirim email lamaran.' }
+              : j
+          )
+        )
+      }
+    })
   }
 
   return (
     <div className="space-y-6">
-      {/* Success Banner if just sent */}
-      {sentSuccessData && (
-        <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in-50">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="text-sm font-semibold">
-                Lamaran Posisi &quot;{sentSuccessData.position}&quot; di {sentSuccessData.company} Berhasil Dikirim!
-              </h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Terkirim ke <strong>{sentSuccessData.email}</strong>. ID Pesan: <code className="text-[11px] font-mono">{sentSuccessData.resendId}</code>
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSentSuccessData(null)}
-              className="text-xs h-8 bg-background"
-            >
-              Kirim Lainnya
-            </Button>
-            <Link
-              href="/riwayat-lamaran"
-              className={buttonVariants({ size: 'sm', className: 'text-xs h-8 gap-1.5 shadow-xs' })}
-            >
-              <History className="h-3.5 w-3.5" />
-              <span>Lihat di Riwayat</span>
-            </Link>
-          </div>
-        </div>
-      )}
+      {/* Sending jobs are shown via the floating SendingJobsIndicator below */}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Form Column (Left) */}
@@ -656,7 +681,7 @@ export function ApplicationForm({
           {/* Submit Trigger Button */}
           <Button
             type="submit"
-            disabled={isSending || isAttachmentSizeExceeded}
+            disabled={isAttachmentSizeExceeded}
             className="w-full h-10 gap-2 shadow-sm font-semibold text-sm"
           >
             <Send className="h-4 w-4" />
@@ -848,8 +873,14 @@ export function ApplicationForm({
         senderName={senderName}
         senderEmail={senderEmail}
         selectedDocuments={selectedDocuments}
-        isSending={isSending}
         onConfirmSend={handleConfirmSend}
+      />
+
+      {/* Floating top-left send status indicator */}
+      <SendingJobsIndicator
+        jobs={sendJobs}
+        onRetry={handleRetry}
+        onDismiss={(id) => setSendJobs((prev) => prev.filter((j) => j.id !== id))}
       />
     </div>
   )

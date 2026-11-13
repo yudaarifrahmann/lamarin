@@ -5,14 +5,14 @@ import { createClient } from '@/lib/supabase/server'
 import { createGmailClientFromRefreshToken } from '@/lib/gmail/client'
 import { buildMimeMessage, type EmailAttachment } from '@/lib/gmail/mime'
 import { decryptToken } from '@/lib/encryption'
-import { replacePlaceholders } from '@/lib/placeholders'
+import { replacePlaceholders, getFormattedTodayDate } from '@/lib/placeholders'
 import {
   isPdfDocument,
   isImageDocument,
   generateMergedPdfFilename,
   mergePdfBuffers,
 } from '@/lib/pdf/merger'
-import { renderLayoutToHtml, getFormattedTodayDate } from '@/lib/templates/layout-engine'
+import { renderLayoutToHtml } from '@/lib/templates/layout-engine'
 import type { TemplateLayoutConfig } from '@/types/template-layout'
 import type { ActionResponse } from '@/app/actions/documents'
 
@@ -215,11 +215,15 @@ export async function sendApplicationAction(
       emailSettings?.default_subject ||
       'Lamaran Pekerjaan: {{position}} - {{company_name}}'
 
+    // Generate today_date once (Asia/Jakarta) — reused for subject, message, and HTML
+    const todayDate = getFormattedTodayDate()
+
     const resolvedSubject = replacePlaceholders(rawSubject, {
       company_name: companyName,
       position: position,
       sender_name: senderName,
       sender_city: senderCity || '',
+      today_date: todayDate,
     })
 
     // 8. Resolve Message Body
@@ -241,6 +245,7 @@ export async function sendApplicationAction(
       position: position,
       sender_name: senderName,
       sender_city: senderCity || '',
+      today_date: todayDate,
     })
 
     // 9. Verify and Download Selected Documents from private Supabase Storage
@@ -481,7 +486,7 @@ export async function sendApplicationAction(
           sender_name: senderName,
           sender_email: senderEmail,
           sender_city: senderCity || '',
-          today_date: getFormattedTodayDate(),
+          today_date: todayDate,
         },
         { forEmail: true }
       )

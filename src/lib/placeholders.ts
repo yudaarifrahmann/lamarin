@@ -33,8 +33,8 @@ export const SUPPORTED_PLACEHOLDERS: PlaceholderVariable[] = [
   {
     tag: '{{today_date}}',
     label: 'Tanggal Hari Ini',
-    sample: 'Jakarta, 12 November 2026',
-    description: 'Tanggal otomatis saat surat dibuat, dalam zona waktu Asia/Jakarta',
+    sample: '13 November 2026',
+    description: 'Tanggal otomatis saat surat dibuat, dalam zona waktu Asia/Jakarta (WIB)',
   },
 ]
 
@@ -43,17 +43,46 @@ export interface PlaceholderValues {
   position?: string
   sender_name?: string
   sender_city?: string
+  /** Tanggal dalam format Indonesia, e.g. "13 November 2026". Jika tidak diisi, digenerate otomatis saat kirim. */
+  today_date?: string
+}
+
+/**
+ * Format today's date in formal Indonesian (e.g. "13 November 2026").
+ * Always uses Asia/Jakarta timezone.
+ */
+export function getFormattedTodayDate(): string {
+  const months = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+  ]
+  const formatter = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = formatter.formatToParts(new Date())
+  const day = parseInt(parts.find((p) => p.type === 'day')!.value, 10)
+  const month = parseInt(parts.find((p) => p.type === 'month')!.value, 10)
+  const year = parseInt(parts.find((p) => p.type === 'year')!.value, 10)
+  return `${day} ${months[month - 1]} ${year}`
 }
 
 /**
  * Replace dynamic placeholders in subject or message body with actual or sample values.
  * Supports both {{variable}} and {variable} notation.
+ * `today_date` defaults to getFormattedTodayDate() (Asia/Jakarta) if not explicitly provided.
  */
 export function replacePlaceholders(
   content: string,
   variables: PlaceholderValues
 ): string {
   if (!content) return ''
+
+  // Resolve today_date once — always use Asia/Jakarta if not explicitly provided
+  const resolvedTodayDate = variables.today_date || getFormattedTodayDate()
+
   return content
     .replace(
       /\{\{?company_name\}\}?/gi,
@@ -78,4 +107,9 @@ export function replacePlaceholders(
       // Empty string when not configured — do NOT show raw placeholder
       variables.sender_city ?? ''
     )
+    .replace(
+      /\{\{?today_date\}\}?/gi,
+      resolvedTodayDate
+    )
 }
+

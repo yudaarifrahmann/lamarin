@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { EmailConfigManager } from '@/components/email-config/email-config-manager'
 import { GmailConnectionCard } from '@/components/config/gmail-connection-card'
 
+export const instant = false
+
 export default async function KonfigurasiEmailPage() {
   await connection()
   const supabase = await createClient()

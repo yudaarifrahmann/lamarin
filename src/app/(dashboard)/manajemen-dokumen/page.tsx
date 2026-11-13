@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DocumentManager } from '@/components/documents/document-manager'
 
+export const instant = false
+
 export default async function ManajemenDokumenPage() {
   await connection()
   const supabase = await createClient()

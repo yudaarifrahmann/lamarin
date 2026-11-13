@@ -10,6 +10,8 @@ import { buttonVariants } from '@/components/ui/button'
 import { ApplicationForm } from '@/components/applications/application-form'
 import { cn } from '@/lib/utils'
 
+export const instant = false
+
 export default async function KirimLamaranPage() {
   await connection()
   const supabase = await createClient()
